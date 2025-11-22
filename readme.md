@@ -2,7 +2,9 @@
 
 ## Project Structure
 
-### firmware - *Tabspace*here is the sourcecode for the rapsberry pico firmware
-### hardware - *Tabspace*here is the kicad project with schematic
-### tools -    *Tabspace*other sourcecode for desktop pc tools
-### doc - *Tabspace*Test
+| Directory | Description |
+|-|-|
+| firmware | here is the sourcecode for the rapsberry pico firmware |
+| hardware | here is the kicad project with schematic |
+| tools | other sourcecode for desktop pc tools |
+| doc | here is the documentation for this project |
