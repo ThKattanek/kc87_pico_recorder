@@ -36,18 +36,18 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(kc87_pico_recorder main.c )
+add_executable(kc87_pico_recorder kc87_pico_recorder.c )
 
 pico_set_program_name(kc87_pico_recorder "kc87_pico_recorder_fw")
 pico_set_program_version(kc87_pico_recorder "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(kc87_pico_recorder 0)
+pico_enable_stdio_uart(kc87_pico_recorder 1)
 pico_enable_stdio_usb(kc87_pico_recorder 0)
 
 # Add the standard library to the build
 target_link_libraries(kc87_pico_recorder
-        pico_stdlib)
+        pico_stdlib hardware_gpio hardware_timer hardware_irq)
 
 # Add the standard include files to the build
 target_include_directories(kc87_pico_recorder PRIVATE
