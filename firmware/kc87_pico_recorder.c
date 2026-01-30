@@ -3,11 +3,44 @@
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
 #include "hardware/irq.h"
+#include "hardware/sync.h"
 #include "config.h"
 
 volatile uint32_t last_timestamp = 0;
 volatile uint32_t timestamp = 0;
 bool edge_type = false; // false = falling, true = rising
+
+// SLIP special bytes
+#define SLIP_END     0xC0
+#define SLIP_ESC     0xDB
+#define SLIP_ESC_END 0xDC
+#define SLIP_ESC_ESC 0xDD
+
+static void slip_write_byte(uint8_t b)
+{
+    if (b == SLIP_END) {
+        putchar_raw(SLIP_ESC);
+        putchar_raw(SLIP_ESC_END);
+    } else if (b == SLIP_ESC) {
+        putchar_raw(SLIP_ESC);
+        putchar_raw(SLIP_ESC_ESC);
+    } else {
+        putchar_raw(b);
+    }
+}
+
+static void send_sample(uint16_t delta_us, bool edge)
+{
+    uint16_t word = (uint16_t)(((edge ? 1u : 0u) << 15) | (delta_us & 0x7FFFu));
+    uint8_t b0 = (uint8_t)(word & 0xFFu);
+    uint8_t b1 = (uint8_t)((word >> 8) & 0xFFu);
+
+    // SLIP frame: END <payload> END
+    putchar_raw(SLIP_END);
+    slip_write_byte(b0);
+    slip_write_byte(b1);
+    putchar_raw(SLIP_END);
+}
 
 void gpio_callback(uint gpio, uint32_t events)
 {
@@ -38,14 +71,27 @@ int main()
     sleep_us(2);
     gpio_set_irq_enabled_with_callback(GPIO_RECORD_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, gpio_callback);
 
-    while (true) 
+    while (true)
     {
-        if(timestamp != 0) 
-        {
-            // Hier können Sie den gespeicherten Zeitstempel verarbeiten
-            printf("Flanke erkannt: %u, Typ: %s\n", timestamp - last_timestamp, edge_type ? "steigend" : "fallend");
-            last_timestamp = timestamp;
+        uint32_t ts = 0;
+        bool edge = false;
+
+        uint32_t irq_state = save_and_disable_interrupts();
+        if (timestamp != 0) {
+            ts = timestamp;
+            edge = edge_type;
             timestamp = 0;
+        }
+        restore_interrupts(irq_state);
+
+        if (ts != 0)
+        {
+            uint32_t delta = ts - last_timestamp;
+            last_timestamp = ts;
+            if (delta > 0x7FFFu) {
+                delta = 0x7FFFu;
+            }
+            send_sample((uint16_t)delta, edge);
         }
     }
 }
