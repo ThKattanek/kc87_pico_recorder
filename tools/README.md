@@ -11,6 +11,62 @@ cmake -S . -B build
 cmake --build build
 ```
 
+### Cross-Compilation for Windows (on Ubuntu/Kubuntu)
+
+To build Windows executables from Linux, you need the MinGW-w64 cross-compiler:
+
+#### 1. Install MinGW-w64 cross-compiler
+```bash
+sudo apt update
+sudo apt install mingw-w64 cmake
+```
+
+#### 2. Create a CMake toolchain file
+Create a file called `mingw-w64-toolchain.cmake` in the tools directory:
+
+```cmake
+# mingw-w64-toolchain.cmake
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+
+# Specify the cross compiler
+set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
+set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
+set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)
+
+# Where to find libraries and headers
+set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32)
+
+# Search for programs in the build host directories
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+# Search for libraries and headers in the target environment
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+```
+
+#### 3. Cross-compile for Windows
+```bash
+# Create build directory for Windows
+cmake -S . -B build-windows -DCMAKE_TOOLCHAIN_FILE=mingw-w64-toolchain.cmake
+cmake --build build-windows
+
+# For 32-bit Windows (optional)
+# Use i686-w64-mingw32-gcc instead and adjust toolchain file accordingly
+```
+
+#### 4. Result
+The Windows executable will be created as:
+- `build-windows/serial_capture.exe`
+
+#### Alternative: One-liner without toolchain file
+```bash
+cmake -S . -B build-windows \
+  -DCMAKE_SYSTEM_NAME=Windows \
+  -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+  -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++
+cmake --build build-windows
+```
+
 ### Windows (from scratch)
 
 For a fresh Windows installation, you need to install the following tools:

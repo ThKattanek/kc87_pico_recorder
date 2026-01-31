@@ -315,15 +315,11 @@ int main(int argc, char **argv)
     sh.handle = INVALID_HANDLE_VALUE;
 #endif
 
-    printf("Opening serial port: %s at %d baud\n", port, baud);
-    
     if (open_serial(&sh, port, baud) != 0) {
         perror("open/configure serial");
         close_serial(&sh);
         return 1;
     }
-    
-    printf("Serial port opened successfully\n");
 
     FILE *out = fopen(out_path, "wb");
     if (!out) {
@@ -370,9 +366,6 @@ int main(int argc, char **argv)
     double last_data_time = start;
     const double timeout_seconds = 5.0;
 
-    printf("Waiting for data...\n");
-    printf("(Press Ctrl+C to stop)\n");
-
     for (;;) {
         uint8_t b;
         int n = read_serial(&sh, &b);
@@ -395,20 +388,9 @@ int main(int argc, char **argv)
 
         // Update time when data is received
         last_data_time = now_seconds();
-        
-        // Debug: Show first few bytes received
-        static int debug_count = 0;
-        if (debug_count < 20) {
-            printf("Received byte: 0x%02X (%d)\n", b, b);
-            debug_count++;
-            if (debug_count == 20) {
-                printf("(Further raw bytes will not be displayed)\n");
-            }
-        }
 
         if (b == SLIP_END) {
             if (frame_len == 2) {
-                printf("Valid SLIP frame received: [0x%02X, 0x%02X]\n", frame[0], frame[1]);
                 fwrite(frame, 1, 2, out);
                 
                 // Process for WAV file if enabled
@@ -429,8 +411,6 @@ int main(int argc, char **argv)
                     fprintf(stderr, "%llu samples, %.1f samples/s\n",
                             (unsigned long long)count, rate);
                 }
-            } else if (frame_len > 0) {
-                printf("Invalid SLIP frame length: %zu (expected 2)\n", frame_len);
             }
             frame_len = 0;
             escaping = false;
