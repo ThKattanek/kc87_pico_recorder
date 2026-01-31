@@ -157,8 +157,8 @@ static int open_serial(serial_handle_t *sh, const char *port, int baud)
     cfsetispeed(&tio, spd);
     cfsetospeed(&tio, spd);
 
-    tio.c_cc[VMIN] = 1;
-    tio.c_cc[VTIME] = 0;
+    tio.c_cc[VMIN] = 0;
+    tio.c_cc[VTIME] = 1;  // 100ms timeout for read operations
 
     if (tcsetattr(sh->fd, TCSANOW, &tio) != 0) {
         return -1;
@@ -236,6 +236,8 @@ int main(int argc, char **argv)
     bool escaping = false;
     uint64_t count = 0;
     double start = now_seconds();
+    double last_data_time = start;
+    const double timeout_seconds = 5.0;
 
     for (;;) {
         uint8_t b;
@@ -248,8 +250,17 @@ int main(int argc, char **argv)
             break;
         }
         if (n == 0) {
+            // Check for timeout when no data is available
+            double current_time = now_seconds();
+            if (current_time - last_data_time >= timeout_seconds) {
+                fprintf(stderr, "No data received for %.1f seconds. Exiting...\n", timeout_seconds);
+                break;
+            }
             continue;
         }
+
+        // Update time when data is received
+        last_data_time = now_seconds();
 
         if (b == SLIP_END) {
             if (frame_len == 2) {
