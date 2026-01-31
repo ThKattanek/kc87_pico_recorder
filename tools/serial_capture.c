@@ -103,20 +103,32 @@ static int open_serial(serial_handle_t *sh, const char *port, int baud)
     dcb.Parity = NOPARITY;
     dcb.StopBits = ONESTOPBIT;
     dcb.fBinary = TRUE;
-    dcb.fDtrControl = DTR_CONTROL_DISABLE;
-    dcb.fRtsControl = RTS_CONTROL_DISABLE;
+    dcb.fDtrControl = DTR_CONTROL_ENABLE;   // Enable DTR
+    dcb.fRtsControl = RTS_CONTROL_ENABLE;   // Enable RTS
+    dcb.fDsrSensitivity = FALSE;
+    dcb.fTXContinueOnXoff = FALSE;
+    dcb.fOutX = FALSE;
+    dcb.fInX = FALSE;
+    dcb.fErrorChar = FALSE;
+    dcb.fNull = FALSE;
+    dcb.fAbortOnError = FALSE;
     if (!SetCommState(sh->handle, &dcb)) {
         return -1;
     }
 
     COMMTIMEOUTS timeouts;
     memset(&timeouts, 0, sizeof(timeouts));
-    timeouts.ReadIntervalTimeout = 1;
-    timeouts.ReadTotalTimeoutConstant = 1;
-    timeouts.ReadTotalTimeoutMultiplier = 0;
+    timeouts.ReadIntervalTimeout = MAXDWORD;    // Return immediately if data available
+    timeouts.ReadTotalTimeoutConstant = 0;      // No total timeout
+    timeouts.ReadTotalTimeoutMultiplier = 0;    // No per-byte timeout
+    timeouts.WriteTotalTimeoutConstant = 1000;  // 1 second write timeout
+    timeouts.WriteTotalTimeoutMultiplier = 0;
     if (!SetCommTimeouts(sh->handle, &timeouts)) {
         return -1;
     }
+
+    // Clear any existing data in the buffers
+    PurgeComm(sh->handle, PURGE_RXCLEAR | PURGE_TXCLEAR);
 
     return 0;
 }
@@ -125,6 +137,13 @@ static int read_serial(serial_handle_t *sh, uint8_t *b)
 {
     DWORD read = 0;
     if (!ReadFile(sh->handle, b, 1, &read, NULL)) {
+        DWORD error = GetLastError();
+        if (error == ERROR_IO_PENDING) {
+            // This shouldn't happen with synchronous I/O, but handle it
+            return 0;
+        }
+        // Set errno for compatibility with main error handling
+        errno = EIO;
         return -1;
     }
     return (int)read;
@@ -296,11 +315,15 @@ int main(int argc, char **argv)
     sh.handle = INVALID_HANDLE_VALUE;
 #endif
 
+    printf("Opening serial port: %s at %d baud\n", port, baud);
+    
     if (open_serial(&sh, port, baud) != 0) {
         perror("open/configure serial");
         close_serial(&sh);
         return 1;
     }
+    
+    printf("Serial port opened successfully\n");
 
     FILE *out = fopen(out_path, "wb");
     if (!out) {
@@ -347,6 +370,9 @@ int main(int argc, char **argv)
     double last_data_time = start;
     const double timeout_seconds = 5.0;
 
+    printf("Waiting for data...\n");
+    printf("(Press Ctrl+C to stop)\n");
+
     for (;;) {
         uint8_t b;
         int n = read_serial(&sh, &b);
@@ -369,9 +395,20 @@ int main(int argc, char **argv)
 
         // Update time when data is received
         last_data_time = now_seconds();
+        
+        // Debug: Show first few bytes received
+        static int debug_count = 0;
+        if (debug_count < 20) {
+            printf("Received byte: 0x%02X (%d)\n", b, b);
+            debug_count++;
+            if (debug_count == 20) {
+                printf("(Further raw bytes will not be displayed)\n");
+            }
+        }
 
         if (b == SLIP_END) {
             if (frame_len == 2) {
+                printf("Valid SLIP frame received: [0x%02X, 0x%02X]\n", frame[0], frame[1]);
                 fwrite(frame, 1, 2, out);
                 
                 // Process for WAV file if enabled
@@ -392,6 +429,8 @@ int main(int argc, char **argv)
                     fprintf(stderr, "%llu samples, %.1f samples/s\n",
                             (unsigned long long)count, rate);
                 }
+            } else if (frame_len > 0) {
+                printf("Invalid SLIP frame length: %zu (expected 2)\n", frame_len);
             }
             frame_len = 0;
             escaping = false;
