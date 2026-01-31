@@ -47633,13 +47633,13 @@
 	)
 	(wire
 		(pts
-			(xy 167.64 100.33) (xy 170.18 100.33)
+			(xy 166.37 80.01) (xy 170.18 80.01)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "ee7d90a7-87f2-432c-add1-d4b24910aaf9")
+		(uuid "ee7a1050-cc38-497e-803a-4a75892eddd5")
 	)
 	(wire
 		(pts
@@ -47697,7 +47697,7 @@
 	)
 	(global_label "KC87_REC_PICO"
 		(shape input)
-		(at 167.64 100.33 180)
+		(at 166.37 80.01 180)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -47707,7 +47707,7 @@
 		)
 		(uuid "a0872441-618e-463f-893e-6128433681fc")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 149.5963 100.33 0)
+			(at 148.3263 80.01 0)
 			(effects
 				(font
 					(size 1.27 1.27)
