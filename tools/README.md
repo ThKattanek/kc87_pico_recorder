@@ -1,6 +1,10 @@
-# Serial Capture Tool
+# KC87 Pico Recorder Tools
 
-Build the host CLI tool (Windows/Linux) from this folder.
+Build the host CLI tools (Windows/Linux) from this folder.
+
+This directory contains two tools:
+- `serial_capture`: Captures data from KC87 via Pico (KC87 → Pico → PC)
+- `serial_transmit`: Transmits data to KC87 via Pico (PC → Pico → KC87)
 
 ## Build (CMake)
 
@@ -55,8 +59,9 @@ cmake --build build-windows
 ```
 
 #### 4. Result
-The Windows executable will be created as:
+The Windows executables will be created as:
 - `build-windows/serial_capture.exe`
+- `build-windows/serial_transmit.exe`
 
 #### Alternative: One-liner without toolchain file
 ```bash
@@ -107,11 +112,13 @@ You can also open the project directly in Visual Studio:
 - Visual Studio will automatically configure the project
 - Build → Build All
 
-The executable will be:
-- Linux: `build/serial_capture`
-- Windows: `build/Debug/serial_capture.exe` (or `build/Release/...`)
+The executables will be:
+- Linux: `build/serial_capture` and `build/serial_transmit`
+- Windows: `build/Debug/serial_capture.exe` and `build/Debug/serial_transmit.exe` (or `build/Release/...`)
 
 ## Usage
+
+### Recording (KC87 → Pico → PC)
 
 ```bash
 serial_capture -p <port> -o <out_file> [-b baud] [-w wav_file]
@@ -137,6 +144,29 @@ serial_capture -p /dev/ttyACM0 -o capture.bin -b 115200 -w audio.wav
 # Windows examples
 serial_capture -p COM6 -o capture.bin -b 115200
 serial_capture -p COM6 -o capture.bin -b 115200 -w audio.wav
+```
+
+### Playback (PC → Pico → KC87)
+
+```bash
+serial_transmit -p <port> -i <input_file> [-b baud]
+```
+
+Parameters:
+- `-p <port>`: Serial port (e.g., /dev/ttyACM0, COM3)
+- `-i <input_file>`: Binary input file to transmit
+- `-b <baud>`: Baud rate (default: 115200)
+
+Examples:
+
+```bash
+# Transmit previously captured data
+serial_transmit -p /dev/ttyACM0 -i capture.bin -b 115200
+```
+
+```powershell
+# Windows example
+serial_transmit -p COM6 -i capture.bin -b 115200
 ```
 
 ## Output Format
