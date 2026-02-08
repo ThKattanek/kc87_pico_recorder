@@ -1,1 +1,2 @@
 #define GPIO_RECORD_PIN 2   // GPIO Pin für Aufnahme-Taste (Im Schaltplan das Signal: "KC87_REC_PICO")
+#define GPIO_PLAY_PIN 3     // GPIO Pin für Wiedergabe-Taste (Im Schaltplan das Signal: "KC87_PLAY_PICO")

@@ -15,10 +15,12 @@
 #include <unistd.h>
 #endif
 
-#define SLIP_END     0xC0
-#define SLIP_ESC     0xDB
-#define SLIP_ESC_END 0xDC
-#define SLIP_ESC_ESC 0xDD
+// Block Protocol Constants
+#define BLOCK_START      0x0000
+#define BLOCK_END        0x8000
+#define BLOCK_TYPE_HEADER 0x00
+#define BLOCK_TYPE_SAMPLES 0x01
+#define PROTOCOL_VERSION  0x01
 
 // WAV file constants
 #define WAV_SAMPLE_RATE 44100
@@ -358,13 +360,17 @@ int main(int argc, char **argv)
         fprintf(stderr, "Recording to WAV file: %s\n", wav_path);
     }
 
-    uint8_t frame[2];
-    size_t frame_len = 0;
-    bool escaping = false;
+    uint8_t buffer[1024];  // Buffer for reading blocks
+    size_t buffer_pos = 0;
     uint64_t count = 0;
+    uint64_t total_bytes = 0;
     double start = now_seconds();
-    double last_data_time = start;
-    const double timeout_seconds = 5.0;
+    bool recording_started = false;
+    bool expecting_stream_end = false;
+    uint8_t last4[4] = {0}; // Track last 4 bytes for end-of-stream detection
+    int last4_count = 0;
+
+    fprintf(stderr, "Waiting for Header Block...\n");
 
     for (;;) {
         uint8_t b;
@@ -377,64 +383,140 @@ int main(int argc, char **argv)
             break;
         }
         if (n == 0) {
-            // Check for timeout when no data is available
-            double current_time = now_seconds();
-            if (current_time - last_data_time >= timeout_seconds) {
-                fprintf(stderr, "No data received for %.1f seconds. Exiting...\n", timeout_seconds);
+            // No timeout needed - firmware sends stream-end signal
+            continue;
+        }
+
+        // Add byte to buffer
+        if (buffer_pos < sizeof(buffer)) {
+            buffer[buffer_pos++] = b;
+        } else {
+            fprintf(stderr, "Buffer overflow, resetting\n");
+            buffer_pos = 0;
+            continue;
+        }
+
+        // Track last 4 bytes for end-of-stream detection (independent of buffer alignment)
+        if (last4_count < 4) {
+            last4[last4_count++] = b;
+        } else {
+            memmove(last4, last4 + 1, 3);
+            last4[3] = b;
+        }
+
+        // Detect end-of-stream marker (0x00 0x80 0x00 0x80)
+        if (recording_started && last4_count >= 4 &&
+            last4[0] == 0x00 && last4[1] == 0x80 &&
+            last4[2] == 0x00 && last4[3] == 0x80) {
+            // Write any remaining buffer data + end marker to file
+            if (buffer_pos > 0) {
+                fwrite(buffer, 1, buffer_pos, out);
+                total_bytes += buffer_pos;
+            }
+            fprintf(stderr, "Stream end detected. Total samples: %llu, Total bytes: %llu\n", 
+                    (unsigned long long)count, (unsigned long long)total_bytes);
+            break;
+        }
+
+        // Try to align to START-BLOCK (0x0000) if we drifted
+        while (buffer_pos >= 2) {
+            uint16_t start_marker = buffer[0] | (buffer[1] << 8);
+            if (start_marker == BLOCK_START) {
                 break;
             }
-            continue;
+            memmove(buffer, buffer + 1, buffer_pos - 1);
+            buffer_pos--;
         }
 
-        // Update time when data is received
-        last_data_time = now_seconds();
-
-        if (b == SLIP_END) {
-            if (frame_len == 2) {
-                fwrite(frame, 1, 2, out);
+        // Check if we have enough data for a potential block header
+        if (buffer_pos >= 6) {  // Minimum block size
+            // Check for START-BLOCK at beginning
+            uint16_t start_marker = buffer[0] | (buffer[1] << 8);
+            if (start_marker == BLOCK_START) {
+                uint8_t block_type = buffer[2];
                 
-                // Process for WAV file if enabled
-                if (wav_file) {
-                    uint16_t word = (frame[1] << 8) | frame[0];
-                    bool edge = (word & 0x8000) != 0;
-                    uint16_t delta_us = word & 0x7FFF;
-                    update_wav_file(wav_file, delta_us, edge, wav_buffer, 
-                                   &wav_buffer_pos, wav_buffer_size, &current_state);
-                }
-                
-                count++;
-                if (count % 1000 == 0) {
-                    fflush(out);
-                    if (wav_file) fflush(wav_file);
-                    double elapsed = now_seconds() - start;
-                    double rate = elapsed > 0 ? count / elapsed : 0.0;
-                    fprintf(stderr, "%llu samples, %.1f samples/s\n",
-                            (unsigned long long)count, rate);
+                if (block_type == BLOCK_TYPE_HEADER && !recording_started && buffer_pos >= 6) {
+                    // Process Header Block: START(2) + TYPE(1) + VERSION(1) + END(2)
+                    uint8_t version = buffer[3];
+                    uint16_t end_marker = buffer[4] | (buffer[5] << 8);
+                    
+                    if (end_marker == BLOCK_END) {
+                        fprintf(stderr, "Header Block received (Version: %d) - Recording started\n", version);
+                        
+                        // Write header block to binary file
+                        fwrite(buffer, 1, 6, out);
+                        total_bytes += 6;
+                        
+                        recording_started = true;
+                        start = now_seconds();
+                        
+                        // Reset buffer for next block
+                        buffer_pos = 0;
+                        continue;
+                    }
+                } else if (block_type == BLOCK_TYPE_SAMPLES && recording_started && buffer_pos >= 5) {
+                    // Process Sample Block: START(2) + TYPE(1) + COUNT(1) + SAMPLES + END(2)
+                    uint8_t sample_count = buffer[3];
+                    size_t expected_block_size = 6 + (sample_count * 2);  // 6 byte overhead + samples
+                    
+                    if (buffer_pos >= expected_block_size) {
+                        // Check END-BLOCK marker
+                        uint16_t end_marker = buffer[expected_block_size - 2] | (buffer[expected_block_size - 1] << 8);
+                        
+                        if (end_marker == BLOCK_END) {
+                            fprintf(stderr, "Sample Block: %d samples\n", sample_count);
+                            
+                            // Write entire block to binary file
+                            fwrite(buffer, 1, expected_block_size, out);
+                            total_bytes += expected_block_size;
+                            
+                            // Process samples for WAV file if enabled
+                            for (int i = 0; i < sample_count; i++) {
+                                size_t sample_offset = 4 + (i * 2);
+                                uint16_t sample = buffer[sample_offset] | (buffer[sample_offset + 1] << 8);
+                                
+                                if (wav_file) {
+                                    bool edge = (sample & 0x8000) != 0;
+                                    uint16_t delta_us = sample & 0x7FFF;
+                                    update_wav_file(wav_file, delta_us, edge, wav_buffer, 
+                                                   &wav_buffer_pos, wav_buffer_size, &current_state);
+                                }
+                                
+                                count++;
+                            }
+                            
+                            if (count % 1000 == 0) {
+                                fflush(out);
+                                if (wav_file) fflush(wav_file);
+                                double elapsed = now_seconds() - start;
+                                double rate = elapsed > 0 ? count / elapsed : 0.0;
+                                fprintf(stderr, "%llu samples, %.1f samples/s, %llu bytes written\n",
+                                        (unsigned long long)count, rate, (unsigned long long)total_bytes);
+                            }
+                            
+                            expecting_stream_end = true;
+                            
+                            // Reset buffer for next block
+                            buffer_pos = 0;
+                            continue;
+                        }
+                    }
                 }
             }
-            frame_len = 0;
-            escaping = false;
-            continue;
+            
+            // Stream end is detected above using the 0x8000 0x8000 sequence
         }
 
-        if (escaping) {
-            if (b == SLIP_ESC_END) {
-                b = SLIP_END;
-            } else if (b == SLIP_ESC_ESC) {
-                b = SLIP_ESC;
+        // Reset buffer if it gets too large without finding a valid block
+        // Max block size is 516 bytes (4 header + 510 samples + 2 end marker)
+        if (buffer_pos > 600) {
+            if (!recording_started) {
+                // Still waiting for header - continue
+                buffer_pos = 0;
+            } else {
+                fprintf(stderr, "Invalid block detected, resetting\n");
+                buffer_pos = 0;
             }
-            escaping = false;
-        } else if (b == SLIP_ESC) {
-            escaping = true;
-            continue;
-        }
-
-        if (frame_len < sizeof(frame)) {
-            frame[frame_len++] = b;
-        } else {
-            // Oversized frame: discard until next END
-            frame_len = 0;
-            escaping = false;
         }
     }
 

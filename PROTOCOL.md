@@ -1,263 +1,137 @@
-# KC87 Pico Recorder Transferprotokoll Dokumentation
+# KC87 Pico Recorder Transferprotokoll
 
 ## Überblick
 
-Das KC87 Pico Recorder System verwendet ein serielles Übertragungsprotokoll basierend auf SLIP (Serial Line Internet Protocol) zur Übertragung von GPIO-Ereignissen (Flanken) vom Raspberry Pi Pico an einen Host-Computer.
+Das KC87 Pico Recorder System verwendet ein blockbasiertes Binärprotokoll zur Übertragung von GPIO-Ereignissen vom Raspberry Pi Pico an einen Host-Computer über USB-Seriell.
 
-## Architektur
+## Protokoll-Konstanten
 
-### Firmware (Pico)
-- **Datei**: `firmware/kc87_pico_recorder.c`
-- **Funktion**: Erfassung von GPIO-Flanken und Übertragung via SLIP-Protokoll
-- **GPIO Pin**: GPIO 2 (konfigurierbar in `config.h`)
-
-### Host-Software (PC)
-- **Datei**: `tools/serial_capture.c`
-- **Funktion**: Empfang und Dekodierung der SLIP-Nachrichten, Speicherung in Binärdatei
-
-## SLIP-Protokoll Grundlagen
-
-SLIP (Serial Line Internet Protocol) ist ein einfaches Protokoll zur Übertragung von Paketen über serielle Verbindungen.
-
-### SLIP Konstanten
 ```c
-#define SLIP_END     0xC0    // Frame-Ende Markierung
-#define SLIP_ESC     0xDB    // Escape-Zeichen
-#define SLIP_ESC_END 0xDC    // Escaped SLIP_END
-#define SLIP_ESC_ESC 0xDD    // Escaped SLIP_ESC
+#define BLOCK_START       0x0000  // Start-Marker eines Blocks
+#define BLOCK_END         0x8000  // End-Marker eines Blocks
+#define BLOCK_TYPE_HEADER 0x00    // Header-Block (Session-Start)
+#define BLOCK_TYPE_SAMPLES 0x01   // Sample-Block (Daten)
+#define PROTOCOL_VERSION  0x01    // Protokoll-Version
 ```
 
-### SLIP Escape-Sequenzen
-- Wenn `0xC0` (SLIP_END) in den Daten vorkommt → wird zu `0xDB 0xDC`
-- Wenn `0xDB` (SLIP_ESC) in den Daten vorkommt → wird zu `0xDB 0xDD`
+## Sample-Datenformat
 
-## Datenformat
-
-### Sample-Datenstruktur
-
-Jedes GPIO-Ereignis wird als 16-Bit Wort übertragen:
+Jedes GPIO-Ereignis wird als 16-Bit Wort (Little-Endian) kodiert:
 
 ```
-Bit 15:    Edge-Typ (0 = fallend, 1 = steigend)
-Bit 14-0:  Delta-Zeit in Mikrosekunden (0-32767 µs)
+Bit 15:    Edge-Typ (1 = steigend, 0 = fallend)
+Bit 14-0:  Delta-Zeit in Mikrosekunden (0–32767 µs)
 ```
 
-### Byte-Anordnung
-- **Byte 0**: Niederwertiges Byte (Bits 0-7)
-- **Byte 1**: Höherwertiges Byte (Bits 8-15)
+**Byte-Anordnung:**
+- Byte 0: Niederwertiges Byte (Bits 0–7)
+- Byte 1: Höherwertiges Byte (Bits 8–15)
 
-## Protokoll-Flow
+**Dekodierung:**
+```c
+uint16_t sample = (byte1 << 8) | byte0;
+bool rising_edge = (sample & 0x8000) != 0;
+uint16_t delta_us = sample & 0x7FFF;
+```
 
-### Sender (Pico Firmware)
+## Block-Strukturen
 
-1. **Initialisierung**:
-   ```c
-   gpio_init(GPIO_RECORD_PIN);
-   gpio_set_dir(GPIO_RECORD_PIN, GPIO_IN);
-   gpio_set_irq_enabled_with_callback(GPIO_RECORD_PIN, 
-                                      GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, 
-                                      true, gpio_callback);
-   ```
+### Header-Block
 
-2. **Interrupt-Handler**:
-   - Erfasst Timestamp mit `time_us_32()`
-   - Bestimmt Flankentyp (steigend/fallend)
+Signalisiert den Beginn einer Recording-Session:
 
-3. **Sample-Übertragung**:
-   ```c
-   // Frame-Format: SLIP_END <byte0> <byte1> SLIP_END
-   putchar_raw(SLIP_END);
-   slip_write_byte(b0);    // Escaped wenn nötig
-   slip_write_byte(b1);    // Escaped wenn nötig
-   putchar_raw(SLIP_END);
-   ```
+```
+┌──────────────┬────────────┬─────────┬──────────────┐
+│ START-BLOCK  │ BLOCK_TYPE │ VERSION │  END-BLOCK   │
+│   0x0000     │    0x00    │  0x01   │   0x8000     │
+│  (2 Bytes)   │  (1 Byte)  │(1 Byte) │  (2 Bytes)   │
+└──────────────┴────────────┴─────────┴──────────────┘
+```
 
-4. **Delta-Zeit Berechnung**:
-   ```c
-   uint32_t delta = timestamp - last_timestamp;
-   if (delta > 0x7FFFu) {
-       delta = 0x7FFFu;  // Maximale Delta-Zeit: 32767 µs
-   }
-   ```
+**Gesamtgröße:** 6 Bytes
 
-### Empfänger (Host-Software)
+### Sample-Block
 
-1. **SLIP-Frame Dekodierung**:
-   - Erkennung von Frame-Grenzen durch `SLIP_END` (0xC0)
-   - Verarbeitung von Escape-Sequenzen
-   - Extraktion der 2-Byte Nutzdaten
+Enthält 1–255 GPIO-Samples:
 
-2. **Sample-Rekonstruktion**:
-   ```c
-   // Aus empfangenen Bytes
-   uint16_t word = (b1 << 8) | b0;
-   bool edge = (word & 0x8000) != 0;         // Bit 15
-   uint16_t delta_us = word & 0x7FFF;        // Bits 0-14
-   ```
+```
+┌──────────────┬────────────┬───────┬─────────┬─────────┬───┬───────────┬──────────────┐
+│ START-BLOCK  │ BLOCK_TYPE │ COUNT │ SAMPLE0 │ SAMPLE1 │...│ SAMPLEN-1 │  END-BLOCK   │
+│   0x0000     │    0x01    │   N   │(2 Bytes)│(2 Bytes)│   │ (2 Bytes) │   0x8000     │
+│  (2 Bytes)   │  (1 Byte)  │(1 Byte)│         │         │   │           │  (2 Bytes)   │
+└──────────────┴────────────┴───────┴─────────┴─────────┴───┴───────────┴──────────────┘
+```
+
+**Gesamtgröße:** 6 + (N × 2) Bytes  
+**Maximale Größe:** 6 + (255 × 2) = 516 Bytes
+
+### End-of-Stream
+
+Zwei aufeinanderfolgende `END-BLOCK`-Marker signalisieren das Ende der Aufnahme:
+
+```
+┌──────────────┬──────────────┐
+│  END-BLOCK   │  END-BLOCK   │
+│   0x8000     │   0x8000     │
+│  (2 Bytes)   │  (2 Bytes)   │
+└──────────────┴──────────────┘
+```
+
+## Übertragungsablauf
+
+1. **Session-Start:** Header-Block beim ersten GPIO-Event
+2. **Datenübertragung:** Sample-Blöcke mit bis zu 255 Samples
+3. **Session-Ende:** End-of-Stream nach 5 Sekunden Inaktivität
+
+## Übertragungsbeispiel
+
+```
+# Header-Block (Session-Start)
+00 00 00 01 00 80
+
+# Sample-Block mit 3 Samples
+00 00 01 03   # START, TYPE=Samples, COUNT=3
+  0A 80       # Sample 0: Steigend, 10 µs
+  05 00       # Sample 1: Fallend, 5 µs
+  0C 80       # Sample 2: Steigend, 12 µs
+00 80         # END-BLOCK
+
+# Sample-Block mit 2 Samples
+00 00 01 02   # START, TYPE=Samples, COUNT=2
+  07 00       # Sample 0: Fallend, 7 µs
+  08 80       # Sample 1: Steigend, 8 µs
+00 80         # END-BLOCK
+
+# End-of-Stream
+00 80         # END-BLOCK
+00 80         # END-BLOCK (Stream-Ende)
+```
 
 ## Serielle Konfiguration
 
-### Standard-Einstellungen
-- **Baudrate**: 115200 bps (konfigurierbar)
-- **Datenbits**: 8
-- **Parität**: Keine
-- **Stoppbits**: 1
-- **Flow Control**: Keine (DTR/RTS deaktiviert)
+**USB-Seriell Einstellungen:**
+- Baudrate: 115200 bps (konfigurierbar)
+- Datenbits: 8
+- Parität: Keine
+- Stoppbits: 1
+- Flow Control: Keine
 
-### Timeout-Verhalten
-- **Read-Timeout**: 100ms (Host-Software)
-- **Inaktivitäts-Timeout**: 5 Sekunden (Host beendet Aufnahme automatisch)
+**Timeout:**
+- Inaktivitäts-Timeout (Firmware): 5 Sekunden → automatischer End-of-Stream
 
-## Frame-Struktur
+## Ausgabedatei-Format
 
-### Gültiger Frame
-```
-[SLIP_END] [DATA_BYTE_0] [DATA_BYTE_1] [SLIP_END]
-   0xC0        b0             b1          0xC0
-```
-
-### Frame mit Escape-Sequenzen (Beispiel)
-Wenn `b0 = 0xC0` (SLIP_END):
-```
-[SLIP_END] [SLIP_ESC] [SLIP_ESC_END] [DATA_BYTE_1] [SLIP_END]
-   0xC0       0xDB        0xDC            b1          0xC0
-```
-
-## Fehlerbehandlung
-
-### Firmware-Seite
-- **Overflow-Schutz**: Delta-Zeit wird auf 32767 µs begrenzt
-- **Interrupt-Synchronisation**: Kritische Abschnitte werden mit `save_and_disable_interrupts()` geschützt
-
-### Host-Seite
-- **Oversized Frames**: Werden verworfen bis zum nächsten `SLIP_END`
-- **Unvollständige Frames**: Werden beim nächsten `SLIP_END` zurückgesetzt
-- **Timeout-Detection**: Automatisches Beenden bei fehlenden Daten
-- **Serial-Fehler**: Fehlerbehandlung für Read-Operationen
-
-## Verwendung
-
-### Kompilierung
-```bash
-# Firmware
-cd firmware
-mkdir -p build && cd build
-cmake ..
-make
-
-# Host-Tool
-cd tools
-mkdir -p build && cd build
-cmake ..
-make
-```
-
-### Ausführung
-```bash
-# Host-Tool starten (nur Binärdaten)
-./serial_capture -p /dev/ttyACM0 -o capture.bin -b 115200
-
-# Host-Tool starten (Binärdaten + WAV-Audiodatei)
-./serial_capture -p /dev/ttyACM0 -o capture.bin -b 115200 -w audio.wav
-```
-
-### Parameter
-- `-p <port>`: Serieller Port (z.B. `/dev/ttyACM0`, `COM3`)
-- `-o <file>`: Ausgabedatei für Binärdaten
-- `-b <baud>`: Baudrate (Standard: 115200)
-- `-w <wav_file>`: **NEU** - Optionale WAV-Audiodatei
-
-## WAV-Datei-Generierung
-
-### Funktionsweise
-Das erweiterte serial_capture Tool kann nun optional eine WAV-Audiodatei generieren, die das digitale Signal rekonstruiert:
-
-- **Samplerate**: 44100 Hz (CD-Qualität)
-- **Format**: 16-Bit PCM Mono
-- **Signalpegel**: ±16383 (etwa 50% vom Maximum für saubere Darstellung)
-
-### Audio-Rekonstruktion
-1. **Zustandsverfolgung**: Das Tool verfolgt den aktuellen GPIO-Zustand (HIGH/LOW)
-2. **Zeitbasierte Interpolation**: Basierend auf den Delta-Zeitstempeln werden Audio-Samples generiert
-3. **Edge-basierte Zustandsänderung**: Bei jeder Flanke (steigend/fallend) wird der Signalzustand gewechselt
-
-### WAV-Datei Aufbau
-```c
-// WAV Header mit Standard-Parametern
-Sample Rate: 44100 Hz
-Channels: 1 (Mono)
-Bits per Sample: 16
-Audio Format: PCM
-```
-
-### Verwendungsbeispiele
-```bash
-# Nur Binärdaten erfassen
-./serial_capture -p /dev/ttyACM0 -o data.bin
-
-# Binärdaten + WAV-Audio gleichzeitig
-./serial_capture -p /dev/ttyACM0 -o data.bin -w signal.wav
-
-# Mit spezifischer Baudrate
-./serial_capture -p /dev/ttyACM0 -o data.bin -w signal.wav -b 230400
-```
-
-## Datenformat der Ausgabedatei
-
-Die Ausgabedatei enthält eine Sequenz von 2-Byte Samples im Little-Endian Format:
+Die Host-Software speichert **alle Bytes im Block-Format** in der `.bin`-Datei, beginnend mit dem Header-Block bis einschließlich der End-of-Stream-Marker:
 
 ```
-[Sample1_Lo] [Sample1_Hi] [Sample2_Lo] [Sample2_Hi] ...
-```
+# Kompletter Inhalt einer .bin Datei:
 
-Jedes Sample kann wie folgt dekodiert werden:
-```c
-uint16_t sample = (high_byte << 8) | low_byte;
-bool rising_edge = (sample & 0x8000) != 0;
-uint16_t delta_microseconds = sample & 0x7FFF;
-```
-
-## Performance-Charakteristika
-
-- **Maximale Auflösung**: 1 Mikrosekunde
-- **Maximaler Delta-Wert**: 32767 Mikrosekunden (32.767 ms)
-- **Typische Übertragungsrate**: ~1000 Samples/Sekunde bei kontinuierlicher Aktivität
-- **Minimale GPIO-Latenz**: Hardware-Interrupt basiert, sehr niedrig
-
-## Limitierungen
-
-1. **Delta-Zeit Overflow**: Bei längeren Pausen > 32767 µs wird der Wert auf Maximum begrenzt
-2. **Baudrate-Limit**: Bei sehr hoher Flankenfrequenz kann die serielle Übertragung zum Bottleneck werden
-3. **Keine Synchronisation**: Keine explizite Synchronisation zwischen Sender und Empfänger
-4. **Keine Checksummen**: Keine Integritätsprüfung der übertragenen Daten
-5. **WAV-Dateigröße**: Bei längeren Aufnahmen können sehr große WAV-Dateien entstehen (44.1 KB pro Sekunde)
-6. **Audio-Auflösung**: Die WAV-Rekonstruktion ist nur so genau wie die ursprünglichen Mikrosekunden-Timestamps
-
-## Troubleshooting
-
-### Häufige Probleme
-
-1. **Keine Daten empfangen**:
-   - Prüfung der seriellen Verbindung
-   - Korrekte Baudrate verwenden
-   - GPIO-Pin korrekt angeschlossen
-
-2. **Unterbrochene Übertragung**:
-   - Timeout-Werte anpassen
-   - Serielle Puffergrößen prüfen
-   - Hardware-Verbindung stabilisieren
-
-3. **Falsche Timestamps**:
-   - System-Timer Kalibrierung prüfen
-   - Interrupt-Latenz berücksichtigen
-
-### Debug-Ausgaben
-
-Das Host-Tool zeigt regelmäßig Statistiken an:
-```
-1000 samples, 150.3 samples/s
-2000 samples, 145.7 samples/s
+[Header-Block: 6 Bytes]
+[Sample-Block 1: 6 + N₁×2 Bytes]
+[Sample-Block 2: 6 + N₂×2 Bytes]
 ...
+[Sample-Block n: 6 + Nₙ×2 Bytes]
+[End-of-Stream: 2 Bytes (0x80 0x00)]
 ```
 
-Diese Ausgaben helfen bei der Überprüfung der Übertragungsleistung und der Erkennung von Problemen.
+Die Datei kann direkt für Playback verwendet oder mit den gleichen Parsing-Regeln analysiert werden, die in diesem Dokument beschrieben sind.
