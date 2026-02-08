@@ -1,71 +1,142 @@
 # KC87 Pico Recorder
 
-KC87 Kassetten-Recorder Emulator mit Raspberry Pi Pico (RP2350).
+KC87 Kassetten-Recorder Emulator mit Raspberry Pi Pico 2 (RP2350).
 
 ## Status
 
 **✅ Recording (Aufnahme): Voll funktional**  
-❌ Playback (Wiedergabe): Entfernt (Timing-Probleme ungelöst)
+❌ Playback (Wiedergabe): Noch nicht implementiert
+
+## Projektstruktur
+
+```
+kc87_pico_recorder/
+├── firmware/          Pico-Firmware (C, Pico SDK)
+├── tools/             Host-Tools (C, Python)
+├── hardware/          KiCad-Schaltplan & PCB
+├── doc/               Dokumentation
+├── PROTOCOL.md        Protokoll-Dokumentation
+└── README.md
+```
 
 ## Hardware
 
-- Raspberry Pi Pico (RP2350) mit Debug-Probe
-- GPIO_2: Recording-Eingang (KC87 → Pico)
-- GPIO_3: Nicht verwendet (war für Playback gedacht)
+- Raspberry Pi Pico 2 (RP2350) mit Debug-Probe
+- **GPIO 3**: Recording-Eingang (`KC87_REC_PICO` — KC87 → Pico)
+- **GPIO 2**: Playback-Ausgang (`KC87_PLAY_PICO` — Pico → KC87, noch nicht implementiert)
 
 ## Firmware
 
-Die Firmware unterstützt nur noch Recording:
-- `firmware/kc87_pico_recorder_clean.c` - Saubere Recording-only Version
-- Erfassst GPIO-Flanken über Hardware-Interrupts
-- Überträgt SLIP-kodierte Samples über USB
-- Perfekte Timing-Auflösung: ±1μs
+- Quelldatei: `firmware/kc87_pico_recorder.c`
+- Konfiguration: `firmware/config.h`
+- Erfasst GPIO-Flanken über Hardware-Interrupts mit Ringpuffer
+- Überträgt Samples in einem blockbasierten Binärprotokoll über USB (siehe [PROTOCOL.md](PROTOCOL.md))
+- Timing-Auflösung: 1 μs (15-Bit Delta, max. 32767 μs)
+- Automatisches Recording-Ende nach 5 s Inaktivität (End-of-Stream-Marker)
+
+### Datenformat (16-Bit Sample)
+
+| Bit 15 | Bit 14–0 |
+|--------|----------|
+| Flanke (1 = steigend, 0 = fallend) | Delta-Zeit in Mikrosekunden |
+
+### Block-Protokoll
+
+Die Übertragung erfolgt in Blöcken mit Header- und Sample-Blöcken:
+
+```
+[START-BLOCK 0x0000] [BLOCK_TYPE] [PAYLOAD...] [END-BLOCK 0x8000]
+```
+
+Details siehe [PROTOCOL.md](PROTOCOL.md).
 
 ## Tools
 
 ### serial_capture
-Empfängt SLIP-Daten vom Pico und speichert als .bin Datei.
+
+Empfängt Block-Daten vom Pico und speichert als `.bin` Datei **im kompletten Block-Format** (Header-Block → Sample-Blöcke → End-of-Stream). Optional wird zusätzlich eine WAV-Audiodatei (44.1 kHz, 16-Bit PCM Mono) erzeugt.
 
 ```bash
-cd tools
-make serial_capture
-./serial_capture -p /dev/ttyACM1 -o aufnahme.bin
-# Strg+C zum Stoppen
+# Nur Binärdaten
+./serial_capture -p /dev/ttyACM0 -o aufnahme.bin
+
+# Binärdaten + WAV-Audio
+./serial_capture -p /dev/ttyACM0 -o aufnahme.bin -w audio.wav
+
+# Mit spezifischer Baudrate
+./serial_capture -p /dev/ttyACM0 -o aufnahme.bin -b 230400
 ```
 
-### analyze_bin.py 
-Analysiert aufgenommene .bin Dateien im Detail.
+Das Recording endet automatisch, sobald die Firmware den End-of-Stream-Marker sendet (5 s Inaktivität).
+
+### serial_transmit
+
+Sendet eine `.bin`-Datei als SLIP-kodierte Samples über eine serielle Verbindung (für zukünftige Playback-Funktion).
 
 ```bash
-./analyze_bin.py aufnahme.bin
+./serial_transmit -p /dev/ttyACM0 -i aufnahme.bin
+```
+
+### analyze_bin.py
+
+Analysiert aufgenommene `.bin`-Dateien im Detail.
+
+```bash
+python3 tools/analyze_bin.py aufnahme.bin
 ```
 
 Ausgabe:
+- Delta-Zeit-Statistiken (Min/Max/Durchschnitt)
+- Flanken-Pattern-Validierung (alternierend steigend/fallend)
 - Frequenz-Analyse (Hz, Jitter)
-- Pattern-Validierung 
-- Signal-Qualitäts-Bewertung
-- Detaillierte Perioden-Statistiken
+- Overflow- und Ausreißer-Erkennung
 
-## Bewährte Workflow
+### Weitere Python-Tools
 
-1. **Pico flashen**: Compile Project → Flash
-2. **Recording starten**: `./serial_capture -p /dev/ttyACM1 -o test.bin`
-3. **KC87 Tape abspielen**: GPIO_2 mit KC87 Kassetten-Ausgang verbinden
-4. **Recording stoppen**: Strg+C nach Aufnahme
-5. **Analyse**: `./analyze_bin.py test.bin`
+- `analyze_first_samples.py` — Analyse der ersten Samples einer Aufnahme
+- `bin_to_c_array.py` — Konvertiert `.bin`-Dateien in ein C-Array
 
-## Validierte Ergebnisse
+## Build
 
-Das Recording-System wurde mit Signalgeneratoren getestet:
-- **1kHz**: 1000.0 Hz ±0.2 Hz (0.02% Jitter) ✅
-- **2kHz**: 2000.0 Hz ±8.2 Hz (0.41% Jitter) ✅  
-- **3kHz**: 3000.0 Hz ±14.5 Hz (0.48% Jitter) ✅
-- **4kHz**: 3999.8 Hz ±22.6 Hz (0.56% Jitter) ✅
+### Firmware
 
-Perfekte Aufnahme-Qualität für KC87-Kassetten!
+Über die VS Code Pico-Extension oder manuell:
 
-## Bekannte Probleme
+```bash
+cd firmware
+mkdir -p build && cd build
+cmake ..
+ninja          # oder: make
+```
 
-- Playback-Funktionalität wurde entfernt (USB-Timing-Konflikte)
-- GPIO_3 wird nicht mehr verwendet
-- Nur Recording wird unterstützt
+### Host-Tools (Linux)
+
+```bash
+cd tools
+cmake -S . -B build
+cmake --build build
+```
+
+### Host-Tools (Cross-Compilation für Windows)
+
+```bash
+cd tools
+cmake -S . -B build-windows -DCMAKE_TOOLCHAIN_FILE=mingw-w64-toolchain.cmake
+cmake --build build-windows
+```
+
+Weitere Build-Details (inkl. Windows nativ) siehe [tools/README.md](tools/README.md).
+
+## Workflow
+
+1. **Pico flashen**: Firmware kompilieren → über Debug-Probe oder UF2 flashen
+2. **Recording starten**: `./serial_capture -p /dev/ttyACM0 -o aufnahme.bin`
+3. **KC87 Tape abspielen**: GPIO 3 mit KC87-Kassettenausgang verbinden
+4. **Recording endet automatisch** nach 5 s Inaktivität
+5. **Analyse**: `python3 tools/analyze_bin.py aufnahme.bin`
+
+## Bekannte Einschränkungen
+
+- Playback-Funktionalität ist noch nicht in der Firmware implementiert
+- Maximale Delta-Zeit pro Sample: 32767 μs (~32 ms) — längere Pausen werden auf diesen Wert begrenzt
+- Bei sehr hoher Flankenfrequenz kann die serielle USB-Übertragung zum Engpass werden

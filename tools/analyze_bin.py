@@ -6,6 +6,72 @@ import struct
 import sys
 import os
 
+# Block protocol constants
+BLOCK_START = 0x0000
+BLOCK_END = 0x8000
+BLOCK_TYPE_HEADER = 0x00
+BLOCK_TYPE_SAMPLES = 0x01
+
+def parse_bin_file(data):
+    """Parst eine .bin Datei im Block-Format und extrahiert Samples"""
+    samples = []
+    pos = 0
+    header_found = False
+    
+    while pos < len(data):
+        # Need at least 6 bytes for minimum block
+        if pos + 6 > len(data):
+            break
+        
+        # Check for START-BLOCK
+        start_marker = struct.unpack('<H', data[pos:pos+2])[0]
+        if start_marker != BLOCK_START:
+            # Skip invalid data
+            pos += 1
+            continue
+        
+        block_type = data[pos + 2]
+        
+        if block_type == BLOCK_TYPE_HEADER:
+            version = data[pos + 3]
+            end_marker = struct.unpack('<H', data[pos+4:pos+6])[0]
+            if end_marker == BLOCK_END:
+                header_found = True
+                pos += 6
+                continue
+        elif block_type == BLOCK_TYPE_SAMPLES and header_found:
+            sample_count = data[pos + 3]
+            expected_size = 6 + (sample_count * 2)
+            
+            if pos + expected_size > len(data):
+                break
+            
+            end_marker = struct.unpack('<H', data[pos+expected_size-2:pos+expected_size])[0]
+            if end_marker == BLOCK_END:
+                # Extract samples
+                for i in range(sample_count):
+                    sample_pos = pos + 4 + (i * 2)
+                    sample = struct.unpack('<H', data[sample_pos:sample_pos+2])[0]
+                    edge = (sample & 0x8000) != 0
+                    delta_us = sample & 0x7FFF
+                    samples.append((edge, delta_us))
+                
+                pos += expected_size
+                continue
+        
+        # Check for End-of-Stream (0x8000 0x8000)
+        if pos + 4 <= len(data):
+            marker1 = struct.unpack('<H', data[pos:pos+2])[0]
+            marker2 = struct.unpack('<H', data[pos+2:pos+4])[0]
+            if marker1 == BLOCK_END and marker2 == BLOCK_END:
+                # End of stream reached
+                break
+        
+        # Skip unknown data
+        pos += 1
+    
+    return samples
+
 def analyze_bin_file(filename):
     """Analysiert eine .bin Datei und gibt detaillierte Statistiken aus"""
     
@@ -20,17 +86,8 @@ def analyze_bin_file(filename):
         print(f"Fehler: {filename} ist leer")
         return
     
-    if len(data) % 2 != 0:
-        print(f"Warnung: {filename} hat ungerade Anzahl Bytes")
-    
-    # Dekodiere alle Samples
-    samples = []
-    for i in range(0, len(data), 2):
-        if i + 1 < len(data):
-            word = struct.unpack('<H', data[i:i+2])[0]
-            edge = (word & 0x8000) != 0
-            delta_us = word & 0x7FFF
-            samples.append((edge, delta_us))
+    # Parse block format
+    samples = parse_bin_file(data)
     
     print(f"\n{'='*60}")
     print(f"ANALYSE: {filename}")
