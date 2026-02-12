@@ -26,7 +26,13 @@ endif()
 # ====================================================================================
 set(PICO_BOARD pico2 CACHE STRING "Board type")
 
+set(FW_VERSION_MAJOR 0)
+set(FW_VERSION_MINOR 1)
+set(FW_VERSION_PATCH 0)
+set(FW_VERSION_STRING "${FW_VERSION_MAJOR}.${FW_VERSION_MINOR}.${FW_VERSION_PATCH}")
+
 # Pull in Raspberry Pi Pico SDK (must be before project)
+
 include(pico_sdk_import.cmake)
 
 project(kc87_pico_recorder C CXX ASM)
@@ -38,8 +44,15 @@ pico_sdk_init()
 
 add_executable(kc87_pico_recorder kc87_pico_recorder.c )
 
+target_compile_definitions(kc87_pico_recorder
+        PRIVATE
+        FW_VERSION_MAJOR=${FW_VERSION_MAJOR}
+        FW_VERSION_MINOR=${FW_VERSION_MINOR}
+        FW_VERSION_PATCH=${FW_VERSION_PATCH}
+)
+
 pico_set_program_name(kc87_pico_recorder "kc87_pico_recorder_fw")
-pico_set_program_version(kc87_pico_recorder "0.1")
+pico_set_program_version(kc87_pico_recorder "${FW_VERSION_STRING}")
 
 # Modify the below lines to enable/disable output over UART/USB
 # UART0 (GPIO0/1) used for binary data stream
