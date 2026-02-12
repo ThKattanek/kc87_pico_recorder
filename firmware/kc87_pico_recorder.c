@@ -112,6 +112,11 @@ int main()
 {   
     // Initialize ONLY USB stdio for debug output (not UART!)
     stdio_usb_init();
+
+    sleep_ms(1000); // Short delay to ensure USB connection is established before printing debug messages
+
+    printf("KC87 Pico Recorder - ");
+    printf("Version: " FW_VERSION_STRING "\n");
     
     // Initialize UART for binary data stream (Debug Probe UART or FT232L)
     uart_init(UART_ID, UART_BAUD_RATE);
