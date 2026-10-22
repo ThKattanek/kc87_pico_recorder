@@ -48,6 +48,7 @@ volatile uint16_t ring_head = 0;
 volatile uint16_t ring_tail = 0;
 
 #define RECORDING_TIMEOUT_US 5 * 1000 * 1000 // 5s inactivity timeout
+#define PLAYBACK_TIMEOUT_US 5 * 1000 * 1000 // 5s max recording length to prevent runaway
 
 void send_header_block()
 {
@@ -244,7 +245,7 @@ int main()
         }
         
         if (!recording || ring_tail == ring_head) {
-            sleep_us(100); // Short sleep to service USB stack (printf) when no data pending
+           // sleep_us(1); // Short sleep to service USB stack (printf) when no data pending
         }
     }
 
