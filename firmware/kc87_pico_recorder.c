@@ -31,7 +31,7 @@
 // 0x0002 - 0x..   [1 Byte] BLOCK_TYPE (0x01 = Sample-Block
 // 0x0003 - 0x..   [1 Byte] SAMPLE_COUNT (N, max 255)
 // 0x0004 - 0x..   [2*N Bytes] SAMPLE0, SAMPLE1, ..., SAMPLEN-1
-// 0x..   - 0x8000 [2 Bytes] END-BLOCK (0x8000)
+// 0x..   - 0x8000 [2 Bytes] END-BLOCK (0x8000)6
 
 // End of Block is always signaled by the fixed END-BLOCK marker (0x8000). The number of samples is specified in the SAMPLE_COUNT field.
 // End of Stream is signaled by consecutive 0x8000 marker 0x8000 
