@@ -2596,9 +2596,9 @@
 		)
 		(uuid "51cee98c-a7e7-4a78-bce5-a50c11661c99")
 	)
-	(text "5V VBUS, damit der OPV ordentlich arbeiten kann. Der Ausgang wir dann durch einen Spannungsteiler angepasst.\nZum eimaligen Einstellen das Poti kommplett auf 0% drehen. Dann mit dem KC87 CSAVE eingeben und das Poti\nsolange drehen bis ein Signal am Ausgang erscheint. So Justieren das, das Signal 50% Pulsweite hat."
+	(text "5V VBUS versorgen den OPV. U1A verstärkt das über C1 gekoppelte KC87-Signal um den Faktor 11 (1+R3/R2) um Vref = 2,5V.\nU1B arbeitet als Komparator gegen Vref, die Hysterese (R6/R7) unterdrückt Rauschen.\nDer Ausgang wird durch den Spannungsteiler R8/R9 auf den Pegel des Pico angepasst.\nEs muss nichts abgeglichen werden: Das frühere Poti zur Einstellung der Pulsweite gibt es in dieser Schaltung nicht mehr."
 		(exclude_from_sim no)
-		(at 22.352 77.724 0)
+		(at 22.352 76.5 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2897,7 +2897,7 @@
 	)
 	(polyline
 		(pts
-			(xy 38.1 25.4) (xy 38.1 73.025)
+			(xy 38.1 25.4) (xy 38.1 71.12)
 		)
 		(stroke
 			(width 0)

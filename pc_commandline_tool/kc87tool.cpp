@@ -1,13 +1,17 @@
 // kc87tool - KC-87 Signal vom Pico aufzeichnen und auswerten (C++17, Windows/Linux/macOS)
 //
 // Bauen:
+//   CMake       : cmake -S . -B build && cmake --build build           (alle Systeme)
+//                 Ergebnis: build/kc87tool (Windows/Visual Studio: build/Release/kc87tool.exe,
+//                 dort mit: cmake --build build --config Release)
 //   Linux/macOS : g++ -std=c++17 -O2 -o kc87tool kc87tool.cpp
 //   Windows     : g++ -std=c++17 -O2 -o kc87tool.exe kc87tool.cpp      (MinGW/MSYS2)
 //                 cl /std:c++17 /O2 /EHsc kc87tool.cpp                  (Visual Studio)
 //
 // Benutzung:
 //   kc87tool record <port> [--sec 30] [--out aufnahme]   z.B. COM5 oder /dev/ttyACM0
-//   kc87tool analyze <datei.csv>                          Statistik + SVG-Diagramme
+//   kc87tool analyze <datei.csv>                          Statistik
+//   kc87tool decode <datei.csv> [--tap datei.tap]         Bloecke + Programmname, optional TAP schreiben
 //   kc87tool wav <datei.csv> [--rate 44100]               Rechtecksignal als WAV
 
 #include <algorithm>
@@ -250,57 +254,6 @@ static void stats(const char* name, std::vector<double> v) {
                 v[v.size() / 2], v.back());
 }
 
-static void write_hist_svg(const std::string& file, const std::vector<int>& hist, double bin_us) {
-    const int W = 1000, H = 420, L = 60, R = 20, T = 30, B = 50;
-    int maxc = std::max(1, *std::max_element(hist.begin(), hist.end()));
-    double lmax = std::log10(maxc + 1.0);
-    std::ofstream f(file);
-    f << "<svg xmlns='http://www.w3.org/2000/svg' width='" << W << "' height='" << H
-      << "' font-family='sans-serif' font-size='12'>\n<rect width='100%' height='100%' fill='white'/>\n"
-      << "<text x='" << W / 2 << "' y='18' text-anchor='middle' font-size='14'>"
-         "Histogramm der Periodendauern (High+Low), log. Skala</text>\n";
-    double bw = double(W - L - R) / hist.size();
-    for (size_t i = 0; i < hist.size(); ++i) {
-        if (!hist[i]) continue;
-        double h = std::log10(hist[i] + 1.0) / lmax * (H - T - B);
-        f << "<rect x='" << L + i * bw << "' y='" << H - B - h << "' width='" << std::max(bw, 1.0)
-          << "' height='" << h << "' fill='#3b6fb6'/>\n";
-    }
-    f << "<line x1='" << L << "' y1='" << H - B << "' x2='" << W - R << "' y2='" << H - B
-      << "' stroke='black'/>\n";
-    double range = hist.size() * bin_us;
-    for (double t = 0; t <= range + 1e-9; t += 500) {
-        double x = L + t / range * (W - L - R);
-        f << "<line x1='" << x << "' y1='" << H - B << "' x2='" << x << "' y2='" << H - B + 5
-          << "' stroke='black'/><text x='" << x << "' y='" << H - B + 20
-          << "' text-anchor='middle'>" << (int)t << "</text>\n";
-    }
-    f << "<text x='" << W / 2 << "' y='" << H - 10 << "' text-anchor='middle'>Periodendauer [us]</text>\n"
-      << "<text x='15' y='" << H / 2 << "' transform='rotate(-90 15 " << H / 2
-      << ")' text-anchor='middle'>Anzahl (max " << maxc << ")</text>\n</svg>\n";
-}
-
-static void write_wave_svg(const std::string& file, const std::vector<Pulse>& p, size_t m) {
-    const int W = 1000, H = 200, L = 40, R = 20, T = 30, B = 40;
-    double total = 0;
-    for (size_t i = 0; i < m; ++i) total += p[i].us;
-    if (total <= 0) return;
-    std::ofstream f(file);
-    f << "<svg xmlns='http://www.w3.org/2000/svg' width='" << W << "' height='" << H
-      << "' font-family='sans-serif' font-size='12'>\n<rect width='100%' height='100%' fill='white'/>\n"
-      << "<text x='" << W / 2 << "' y='18' text-anchor='middle' font-size='14'>Erste " << m
-      << " Pulse (" << total / 1000.0 << " ms)</text>\n<polyline fill='none' stroke='#3b6fb6' points='";
-    double yh = T, yl = H - B, t = 0;
-    for (size_t i = 0; i < m; ++i) {
-        double y = p[i].high ? yh : yl;
-        double x0 = L + t / total * (W - L - R);
-        t += p[i].us;
-        double x1 = L + t / total * (W - L - R);
-        f << x0 << ',' << y << ' ' << x1 << ',' << y << ' ';
-    }
-    f << "'/>\n<text x='" << W / 2 << "' y='" << H - 10 << "' text-anchor='middle'>Zeit</text>\n</svg>\n";
-}
-
 static void analyze(const std::string& csv) {
     auto p = load_csv(csv);
     if (p.empty()) throw std::runtime_error("Keine Daten in " + csv);
@@ -332,11 +285,138 @@ static void analyze(const std::string& csv) {
         if (hist[i])
             std::printf("  %5.0f-%5.0f us: %7dx  (~%.0f Hz)\n", i * BIN, (i + 1) * BIN, hist[i],
                         1e6 / (i * BIN + BIN / 2));
+}
 
-    std::string b = base_name(csv);
-    write_hist_svg(b + "_histogramm.svg", hist, BIN);
-    write_wave_svg(b + "_verlauf.svg", p, std::min<size_t>(400, p.size()));
-    std::printf("Diagramme: %s_histogramm.svg, %s_verlauf.svg (im Browser oeffnen)\n", b.c_str(), b.c_str());
+// ---------------------------------------------------------------------------
+// decode
+// ---------------------------------------------------------------------------
+// Bandformat (aus einer echten CSAVE-Aufnahme abgelesen):
+//   Eine Periode besteht aus zwei gleich langen Pulsen (High + Low):
+//     Bit 0      : 2 x ~250 us  (~2 kHz)
+//     Bit 1      : 2 x ~455 us  (~1,1 kHz)
+//     Trennzeichen: 2 x ~870 us (~575 Hz)
+//   Ein Byte sind 8 Bits (LSB zuerst), jedem Byte geht ein Trennzeichen voraus.
+//   Vor jedem Block steht ein Vorton aus 1-Bits (kein gueltiges Byte).
+//   Block = 130 Bytes: Blocknummer, 128 Datenbytes, Pruefsumme (Summe der
+//   Datenbytes modulo 256).
+//   BASIC-Programme (CSAVE) enthalten D3 D3 D3 und danach den Programmnamen
+//   mit 8 Zeichen.
+static constexpr double SHORT_MAX_US = 350.0;  // darunter: Bit 0
+static constexpr double MID_MAX_US = 650.0;    // darunter: Bit 1, darueber: Trennzeichen
+static constexpr size_t BLOCK_DATA = 128;
+
+struct Block {
+    uint8_t nr;
+    uint8_t data[BLOCK_DATA];
+    bool checksum_ok;
+};
+
+// Liefert die Bytes in Abschnitten; ein Abschnitt endet, sobald statt eines
+// Bytes (8 Bits) etwas anderes folgt, z.B. der Vorton vor dem naechsten Block.
+static std::vector<std::vector<uint8_t>> decode_segments(const std::vector<Pulse>& p, size_t& bad_periods) {
+    auto cls = [](double us) { return us < SHORT_MAX_US ? 'S' : (us < MID_MAX_US ? 'M' : 'L'); };
+    std::vector<std::vector<uint8_t>> segs(1);
+    std::vector<int> bits;
+    bool in_byte = false;
+    bad_periods = 0;
+
+    auto end_group = [&]() {
+        if (!in_byte) return;
+        if (bits.size() == 8) {
+            uint8_t v = 0;
+            for (int k = 0; k < 8; ++k) v |= (uint8_t)(bits[k] << k);
+            segs.back().push_back(v);
+        } else if (!segs.back().empty()) {
+            segs.emplace_back();
+        }
+        bits.clear();
+    };
+
+    for (size_t i = 0; i + 1 < p.size();) {
+        char a = cls(p[i].us), b = cls(p[i + 1].us);
+        if (a != b) { ++bad_periods; ++i; continue; }   // Pulse nicht paarweise gleich: neu synchronisieren
+        i += 2;
+        if (a == 'L') {
+            end_group();
+            in_byte = true;
+        } else if (in_byte) {
+            bits.push_back(a == 'M' ? 1 : 0);
+        }
+    }
+    end_group();
+    if (segs.back().empty()) segs.pop_back();
+    return segs;
+}
+
+static std::vector<Block> blocks_from_segments(const std::vector<std::vector<uint8_t>>& segs) {
+    std::vector<Block> blocks;
+    for (const auto& s : segs) {
+        if (s.size() != 1 + BLOCK_DATA + 1) continue;
+        Block b{};
+        b.nr = s[0];
+        uint8_t sum = 0;
+        for (size_t i = 0; i < BLOCK_DATA; ++i) { b.data[i] = s[1 + i]; sum = (uint8_t)(sum + b.data[i]); }
+        b.checksum_ok = (sum == s[1 + BLOCK_DATA]);
+        blocks.push_back(b);
+    }
+    return blocks;
+}
+
+static std::string basic_name(const uint8_t* d, size_t len) {
+    for (size_t i = 0; i + 11 <= len; ++i) {
+        if (d[i] != 0xD3 || d[i + 1] != 0xD3 || d[i + 2] != 0xD3) continue;
+        std::string name;
+        for (size_t k = 0; k < 8; ++k) {
+            uint8_t c = d[i + 3 + k];
+            name += (c >= 32 && c < 127) ? (char)c : '?';
+        }
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+        return name;
+    }
+    return "";
+}
+
+static std::vector<Block> decode(const std::string& csv) {
+    auto p = load_csv(csv);
+    if (p.empty()) throw std::runtime_error("Keine Daten in " + csv);
+    size_t bad = 0;
+    auto segs = decode_segments(p, bad);
+    auto blocks = blocks_from_segments(segs);
+    size_t nbytes = 0;
+    for (const auto& s : segs) nbytes += s.size();
+    std::printf("Dekodiert: %zu Bytes, %zu Bloecke", nbytes, blocks.size());
+    if (bad) std::printf(" (%zu ungueltige Perioden uebersprungen)", bad);
+    std::printf("\n");
+
+    for (const auto& b : blocks) {
+        std::string name = basic_name(b.data, BLOCK_DATA);
+        std::printf("  Block %3u: Pruefsumme %s", b.nr, b.checksum_ok ? "OK" : "FALSCH");
+        if (!name.empty()) std::printf("  BASIC-Programm \"%s\"", name.c_str());
+        std::printf("\n");
+    }
+    if (blocks.empty()) {
+        std::printf("Keine vollstaendigen Bloecke gefunden. Erste Bytes:\n ");
+        const auto& s = segs.front();
+        for (size_t i = 0; i < s.size() && i < 48; ++i) std::printf(" %02X", s[i]);
+        std::printf("\n");
+    }
+    return blocks;
+}
+
+// TAP-Datei: 16 Byte Kennung, danach je Block Blocknummer + 128 Datenbytes.
+static void write_tap(const std::string& file, const std::vector<Block>& blocks) {
+    static const char HEAD[17] = "\xC3KC-TAPE by AF. ";
+    std::ofstream f(file, std::ios::binary);
+    if (!f) throw std::runtime_error("Kann " + file + " nicht schreiben");
+    f.write(HEAD, 16);
+    size_t n = 0;
+    for (const auto& b : blocks) {
+        if (!b.checksum_ok) { std::printf("  Block %u mit falscher Pruefsumme uebersprungen\n", b.nr); continue; }
+        f.put((char)b.nr);
+        f.write((const char*)b.data, BLOCK_DATA);
+        ++n;
+    }
+    std::printf("TAP geschrieben: %s (%zu Bloecke)\n", file.c_str(), n);
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +451,7 @@ static void usage() {
     std::cout << "Benutzung:\n"
                  "  kc87tool record <port> [--sec 30] [--out aufnahme]\n"
                  "  kc87tool analyze <datei.csv>\n"
+                 "  kc87tool decode <datei.csv> [--tap datei.tap]\n"
                  "  kc87tool wav <datei.csv> [--rate 44100]\n";
 }
 
@@ -385,8 +466,12 @@ int main(int argc, char** argv) {
         if (cmd == "record") {
             std::string csv = record(arg, std::stod(get("--sec", "30")), get("--out", "aufnahme"));
             analyze(csv);
+            write_tap(base_name(csv) + ".tap", decode(csv));
         } else if (cmd == "analyze") {
             analyze(arg);
+        } else if (cmd == "decode") {
+            auto blocks = decode(arg);
+            if (opt.count("--tap")) write_tap(opt["--tap"], blocks);
         } else if (cmd == "wav") {
             to_wav(arg, (uint32_t)std::stoul(get("--rate", "44100")));
         } else {
