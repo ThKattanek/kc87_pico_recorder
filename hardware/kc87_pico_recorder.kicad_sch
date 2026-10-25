@@ -2585,7 +2585,7 @@
 		)
 		(uuid "36ea2237-70d8-4a3f-bbb5-8a29667776e1")
 	)
-	(text "Einstellen des Pegels: Rechtecksignal 3,3V PP an PLAY_SIGNAL_PICO anlegen (Test-Firmware kc87_play_test oder Playback-Programm).\nPLAY_SIGNAL mit dem Oszilloskop messen und mit RV2 auf ca. 250mV PP einstellen (Bereich ca. 200 bis 295mV PP)\n(KC87-Eingang: Re = 10k, Ue_ss min. 24mV; Recorder-Norm min. 200mV).\nR4 + RV2 bilden zusammen mit R5 einen Spannungsteiler, die Quellimpedanz am KC87 betraegt maximal ca. 180 Ohm."
+	(text "Einstellen des Pegels: Rechtecksignal 3,3V PP an PLAY_SIGNAL_PICO anlegen (Test-Firmware kc87_play_test oder Playback-Programm).\nPLAY_SIGNAL mit dem Oszilloskop messen und mit RV2 auf ca. 250mV PP einstellen (Bereich ca. 165 bis 250mV PP)\n(KC87-Eingang: Re = 10k, Ue_ss min. 24mV; Recorder-Norm min. 200mV).\nR4 + RV2 bilden zusammen mit R5 einen Spannungsteiler, die Quellimpedanz am KC87 betraegt maximal ca. 150 Ohm."
 		(exclude_from_sim no)
 		(at 21.844 139.7 0)
 		(effects
@@ -6232,7 +6232,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "180"
+		(property "Value" "150"
 			(at 92.71 113.0299 0)
 			(show_name no)
 			(do_not_autoplace no)

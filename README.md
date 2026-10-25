@@ -52,7 +52,7 @@ Status: Bit 0 = Ringpuffer-Überlauf, Bit 1 = PIO-Stall.
 
 ### Test-Firmware für den PLAY-Pegel
 
-`firmware/play_test.c` (Target `kc87_play_test`, eigene `.uf2`-Datei) gibt an GPIO 3 ein Rechtecksignal mit 50 % Tastverhältnis aus. Damit lässt sich der Pegel der PLAY-Schaltung einstellen, noch ohne Playback-Software: PLAY_SIGNAL mit dem Oszilloskop messen und mit RV2 auf ca. 250 mV PP abgleichen (Einstellbereich ca. 200 bis 295 mV PP) (KC87-Eingang: Re = 10 kΩ, mind. 24 mV PP). Die Frequenzen sind die Sollwerte des KC87 (laut [Kassetteninterface](https://hc-ddr.hucki.net/wiki/doku.php/z9001/software/os/kassetteninterface)); am echten KC87 habe ich etwas niedrigere Werte gemessen (siehe [Bandformat](#bandformat)). Nach dem Start läuft der Wechsel zwischen 1,2 und 2,4 kHz (je 1 s).
+`firmware/play_test.c` (Target `kc87_play_test`, eigene `.uf2`-Datei) gibt an GPIO 3 ein Rechtecksignal mit 50 % Tastverhältnis aus. Damit lässt sich der Pegel der PLAY-Schaltung einstellen, noch ohne Playback-Software: PLAY_SIGNAL mit dem Oszilloskop messen und mit RV2 auf ca. 250 mV PP abgleichen (Einstellbereich ca. 165 bis 250 mV PP) (KC87-Eingang: Re = 10 kΩ, mind. 24 mV PP). Die Frequenzen sind die Sollwerte des KC87 (laut [Kassetteninterface](https://hc-ddr.hucki.net/wiki/doku.php/z9001/software/os/kassetteninterface)); am echten KC87 habe ich etwas niedrigere Werte gemessen (siehe [Bandformat](#bandformat)). Nach dem Start läuft der Wechsel zwischen 1,2 und 2,4 kHz (je 1 s).
 
 Steuerung über die USB-Schnittstelle (z. B. mit `picocom -b 115200 /dev/ttyACM0` oder einem anderen Terminalprogramm), ein Zeichen genügt:
 
