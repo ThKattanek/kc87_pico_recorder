@@ -12,6 +12,7 @@ Alle Wörter sind `uint32`, little-endian.
 |---------|-----------|
 | `'S'` | Aufnahme starten |
 | `'X'` | Aufnahme stoppen |
+| `'P'` | Wiedergabe starten |
 
 ## Datenstrom (Pico → PC)
 
@@ -40,6 +41,19 @@ Umrechnung in Mikrosekunden: `us = ticks * 1e6 / tick_hz`
 4. Pico sendet restliche Daten und den Trailer, danach wartet er auf den nächsten `'S'`
 
 Der Pico beendet die Aufnahme nicht selbst; eine Inaktivitäts-Erkennung gibt es nicht.
+
+## Wiedergabe
+
+1. PC sendet `'P'`
+2. Pico antwortet mit dem Header (`"KC87"`, `tick_hz`, wie bei der Aufnahme)
+3. PC sendet die Pulsdauern in Ticks als `uint32`, abwechselnd High, Low, High, … (erster Wert ist High), danach `0xFFFFFFFF`
+4. Der Pico gibt die Pulse an GP3 aus. Er sammelt zuerst 2048 Werte (oder bis zum Ende), danach startet die Ausgabe. Ist sein Ringpuffer (8192 Werte) voll, nimmt er keine Daten an, die USB-Verbindung bremst den PC.
+5. Am Ende sendet der Pico `0xFFFFFFFF`, `status`, `count` und bleibt auf Low
+
+- **status**: Bit 0 = Unterlauf (Daten kamen zu spät), Bit 1 = Abbruch (5 s keine Daten oder USB getrennt)
+- **count**: Anzahl der ausgegebenen Pulse (ohne die automatisch angehängte Low-Phase)
+- Endet die Folge mit einem High-Puls, hängt der Pico 20 ms Low an
+- Ein Puls dauert im PIO-Programm Wert + 4 Takte, die Firmware zieht die 4 Takte vorher ab (Mindestdauer 4 Ticks)
 
 ## Interna der Firmware
 

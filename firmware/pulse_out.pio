@@ -1,0 +1,18 @@
+; Gibt abwechselnd High- und Low-Pulse mit vorgegebener Dauer am Ausgangspin aus.
+; Das FIFO liefert die Dauern: erstes Wort = High, zweites = Low, usw.
+; Pro Zaehlschritt 1 Takt. Ein Puls dauert Wert + 4 Takte (set, mov, Schleife, pull);
+; main.c zieht die 4 Takte daher vor dem Schreiben ins FIFO ab.
+
+.program pulse_out
+.wrap_target
+    pull block
+    set pins, 1
+    mov x, osr
+hi:
+    jmp x-- hi
+    pull block
+    set pins, 0
+    mov x, osr
+lo:
+    jmp x-- lo
+.wrap
