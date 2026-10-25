@@ -1,0 +1,25 @@
+; Misst abwechselnd die Dauer der High- und Low-Phase am Eingangspin.
+; Pro Zaehlschritt 2 Takte. X zaehlt von 0xFFFFFFFF abwaerts,
+; die Dauer in Schritten ist daher ~X (wird in main.c invertiert).
+; Reihenfolge im FIFO: High, Low, High, Low, ...
+
+.program pulse_timer
+.wrap_target
+    wait 1 pin 0        ; auf High synchronisieren
+    mov x, ~null
+hi:
+    jmp pin hi_dec
+    jmp hi_done
+hi_dec:
+    jmp x-- hi
+hi_done:
+    mov isr, x
+    push block
+    mov x, ~null
+lo:
+    jmp pin lo_done
+    jmp x-- lo
+lo_done:
+    mov isr, x
+    push block
+.wrap

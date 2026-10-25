@@ -1,106 +1,105 @@
 # KC87 Pico Recorder
 
-KC87 Kassetten-Recorder Emulator mit Raspberry Pi Pico 2 (RP2350).
+KC87 Kassetten-Recorder Emulator mit Raspberry Pi Pico (RP2040) oder Pico 2 (RP2350).
 
 ## Status
 
-**✅ Recording (Aufnahme): Voll funktional**  
+**✅ Recording (Aufnahme): funktional**  
+**✅ Auswertung am PC: Blöcke, Prüfsummen, BASIC-Programmname, TAP-Export** (in JKCEMU geladen und gestartet)  
 ❌ Playback (Wiedergabe): Noch nicht implementiert
 
 ## Projektstruktur
 
 ```
 kc87_pico_recorder/
-├── firmware/          Pico-Firmware (C, Pico SDK)
-├── tools/             Host-Tools (C, Python)
-├── hardware/          KiCad-Schaltplan & PCB
-├── doc/               Dokumentation
-├── PROTOCOL.md        Protokoll-Dokumentation
+├── firmware/            Pico-Firmware (C, Pico SDK, PIO)
+├── pc_commandline_tool/ PC-Kommandozeilentool kc87tool (C++17)
+├── hardware/            KiCad-Schaltplan & PCB
+├── doc/                 Dokumentation
+├── PROTOCOL.md          Protokoll-Dokumentation
 └── README.md
 ```
 
 ## Hardware
 
-- Raspberry Pi Pico 2 (RP2350) mit Debug-Probe
-- **GPIO 3**: Recording-Eingang (`KC87_REC_PICO` — KC87 → Pico)
-- **GPIO 2**: Playback-Ausgang (`KC87_PLAY_PICO` — Pico → KC87, noch nicht implementiert)
+- Raspberry Pi Pico (RP2040) oder Pico 2 (RP2350), optional mit Debug-Probe
+- **GPIO 2**: Eingang für das KC87-Signal (KC87 → Pico, Programm-Save)
+- **GPIO 3**: Playback-Ausgang (`PLAY_SINGAL_PICO` — Pico → KC87), im Schaltplan vorgesehen, in der Firmware noch nicht implementiert
+
+Maßgeblich für die Pinbelegung ist der Schaltplan in `hardware/`.
 
 ## Firmware
 
-- Quelldatei: `firmware/kc87_pico_recorder.c`
-- Konfiguration: `firmware/config.h`
-- Erfasst GPIO-Flanken über Hardware-Interrupts mit Ringpuffer
-- Überträgt Samples in einem blockbasierten Binärprotokoll über USB (siehe [PROTOCOL.md](PROTOCOL.md))
-- Timing-Auflösung: 1 μs (15-Bit Delta, max. 32767 μs)
-- Automatisches Recording-Ende nach 5 s Inaktivität (End-of-Stream-Marker)
+- Quellen: `firmware/main.c`, `firmware/pulse_timer.pio` (Target `kc87_logger`)
+- Ein PIO-Zustandsautomat misst abwechselnd die Dauer der High- und Low-Phasen an GP2
+- Timing-Auflösung: 0,2 µs (5 MHz Zähltakt, 32-Bit-Zähler)
+- Die Messwerte laufen per DMA in einen 32-KB-Ringpuffer; daher gehen auch bei kurzen USB-Verzögerungen keine Pulse verloren
+- Übertragung über USB-CDC (siehe [PROTOCOL.md](PROTOCOL.md))
+- Gesteuert vom PC: `S` startet die Aufnahme, `X` beendet sie
 
-### Datenformat (16-Bit Sample)
+### Protokoll (Kurzfassung)
 
-| Bit 15 | Bit 14–0 |
-|--------|----------|
-| Flanke (1 = steigend, 0 = fallend) | Delta-Zeit in Mikrosekunden |
+Alle Wörter sind `uint32` little-endian:
 
-### Block-Protokoll
+| Richtung | Inhalt |
+|----------|--------|
+| PC → Pico | `'S'` Start, `'X'` Stopp |
+| Pico → PC | Header: `"KC87"` (`0x3738434B`), `tick_hz` |
+| Pico → PC | Daten: Dauer in Ticks, abwechselnd High, Low, High, … |
+| Pico → PC | Ende: `0xFFFFFFFF`, Status, Anzahl Werte |
 
-Die Übertragung erfolgt in Blöcken mit Header- und Sample-Blöcken:
+Status: Bit 0 = Ringpuffer-Überlauf, Bit 1 = PIO-Stall.
 
-```
-[START-BLOCK 0x0000] [BLOCK_TYPE] [PAYLOAD...] [END-BLOCK 0x8000]
-```
+## PC-Tool: kc87tool
 
-Details siehe [PROTOCOL.md](PROTOCOL.md).
-
-## Tools
-
-### serial_capture
-
-Empfängt Block-Daten vom Pico und speichert als `.bin` Datei **im kompletten Block-Format** (Header-Block → Sample-Blöcke → End-of-Stream). Optional wird zusätzlich eine WAV-Audiodatei (44.1 kHz, 16-Bit PCM Mono) erzeugt.
+Quelle: `pc_commandline_tool/kc87tool.cpp` (Windows, Linux, macOS).
 
 ```bash
-# Nur Binärdaten
-./serial_capture -p /dev/ttyACM0 -o aufnahme.bin
-
-# Binärdaten + WAV-Audio
-./serial_capture -p /dev/ttyACM0 -o aufnahme.bin -w audio.wav
-
-# Mit spezifischer Baudrate
-./serial_capture -p /dev/ttyACM0 -o aufnahme.bin -b 230400
+kc87tool record <port> [--sec 30] [--out aufnahme]   # z.B. COM5 oder /dev/ttyACM0
+kc87tool analyze <datei.csv>                          # Statistik
+kc87tool decode <datei.csv> [--tap datei.tap]         # Blöcke + Programmname, optional TAP-Datei
+kc87tool wav <datei.csv> [--rate 44100]               # Rechtecksignal als WAV
 ```
 
-Das Recording endet automatisch, sobald die Firmware den End-of-Stream-Marker sendet (5 s Inaktivität).
+- **record**: sendet `S`, zeichnet `--sec` Sekunden auf (Standard 30), sendet `X` und speichert die Pulse als `<out>.csv`. Danach werden automatisch `analyze` und `decode` ausgeführt; dabei entsteht auch `<out>.tap`. Meldet Ringpuffer-Überlauf, PIO-Stall oder fehlenden Endmarker als Warnung.
+- **analyze**: gibt Min/Median/Max für High, Low und Periodendauer aus, sowie die häufigsten Periodenlängen.
+- **decode**: zerlegt das Bandsignal in Bytes und Blöcke (siehe [Bandformat](#bandformat)). Zeigt je Block Nummer und Prüfsummen-Status, bei BASIC-Programmen auch den Programmnamen. Mit `--tap <datei>` werden alle Blöcke mit gültiger Prüfsumme als TAP-Datei geschrieben, damit sie in einem Emulator geladen werden können (mit JKCEMU 0.9.9.1 getestet: laden und starten funktioniert). Blöcke mit falscher Prüfsumme werden übersprungen.
+- **wav**: erzeugt `<name>.wav` (8 Bit, Mono) aus der CSV-Datei.
 
-### serial_transmit
+CSV-Format: Kopfzeile `level;dauer_us`, danach je Zeile `1;<µs>` (High) oder `0;<µs>` (Low).
 
-Sendet eine `.bin`-Datei als SLIP-kodierte Samples über eine serielle Verbindung (für zukünftige Playback-Funktion).
+Beispielausgabe von `decode`:
 
-```bash
-./serial_transmit -p /dev/ttyACM0 -i aufnahme.bin
+```
+Dekodiert: 260 Bytes, 2 Bloecke
+  Block   0: Pruefsumme OK
+  Block   1: Pruefsumme OK  BASIC-Programm "TEST123"
+TAP geschrieben: aufnahme.tap (2 Bloecke)
 ```
 
-### analyze_bin.py
+### Bandformat
 
-Analysiert aufgenommene `.bin`-Dateien im Detail.
+Aus einer echten `CSAVE`-Aufnahme abgelesen:
 
-```bash
-python3 tools/analyze_bin.py aufnahme.bin
-```
+| Symbol | Periode | Frequenz |
+|--------|---------|----------|
+| Bit 0 | 2 Pulse à ca. 250 µs | ca. 2 kHz |
+| Bit 1 | 2 Pulse à ca. 455 µs | ca. 1,1 kHz |
+| Trennzeichen | 2 Pulse à ca. 870 µs | ca. 575 Hz |
 
-Ausgabe:
-- Delta-Zeit-Statistiken (Min/Max/Durchschnitt)
-- Flanken-Pattern-Validierung (alternierend steigend/fallend)
-- Frequenz-Analyse (Hz, Jitter)
-- Overflow- und Ausreißer-Erkennung
+- Ein Byte besteht aus 8 Bits, LSB zuerst. Vor jedem Byte steht ein Trennzeichen.
+- Vor jedem Block steht ein Vorton aus 1-Bits (der erste ist sehr lang, ca. 6000 Perioden).
+- Ein Block hat 130 Bytes: Blocknummer, 128 Datenbytes, Prüfsumme (Summe der Datenbytes modulo 256).
+- BASIC-Programme (`CSAVE`) enthalten `D3 D3 D3`, danach den Programmnamen (8 Zeichen) und den Programmtext.
+- Das TAP-Format: 16 Byte Kennung `\xC3KC-TAPE by AF. `, danach je Block Blocknummer + 128 Datenbytes.
 
-### Weitere Python-Tools
-
-- `analyze_first_samples.py` — Analyse der ersten Samples einer Aufnahme
-- `bin_to_c_array.py` — Konvertiert `.bin`-Dateien in ein C-Array
+Die Schwellen für die Unterscheidung liegen bei 350 µs und 650 µs pro Puls (Konstanten `SHORT_MAX_US` und `MID_MAX_US` in `kc87tool.cpp`).
 
 ## Build
 
 ### Firmware
 
-Über die VS Code Pico-Extension oder manuell:
+Über die VS Code Pico-Extension oder manuell (Pico SDK 2.3.0, `PICO_SDK_PATH` setzen):
 
 ```bash
 cd firmware
@@ -109,34 +108,35 @@ cmake ..
 ninja          # oder: make
 ```
 
-### Host-Tools (Linux)
+Ergebnis: `kc87_logger.uf2` / `.elf`.
+
+Die Ziel-Platine steht in `firmware/CMakeLists.txt` (`set(PICO_BOARD pico ...)`):
+
+- Pico 1 (RP2040): `pico` (Standard)
+- Pico 2 (RP2350): `pico2`, oder beim Konfigurieren mit `cmake -DPICO_BOARD=pico2 ..` (bei einem schon vorhandenen `build/`-Ordner diesen vorher löschen)
+
+### PC-Tool
 
 ```bash
-cd tools
+cd pc_commandline_tool
 cmake -S . -B build
 cmake --build build
 ```
 
-### Host-Tools (Cross-Compilation für Windows)
-
-```bash
-cd tools
-cmake -S . -B build-windows -DCMAKE_TOOLCHAIN_FILE=mingw-w64-toolchain.cmake
-cmake --build build-windows
-```
-
-Weitere Build-Details (inkl. Windows nativ) siehe [tools/README.md](tools/README.md).
+Alternativ ohne CMake: `g++ -std=c++17 -O2 -o kc87tool kc87tool.cpp` (unter Windows mit MinGW/MSYS2 bzw. `cl /std:c++17 /O2 /EHsc kc87tool.cpp` mit Visual Studio).
 
 ## Workflow
 
 1. **Pico flashen**: Firmware kompilieren → über Debug-Probe oder UF2 flashen
-2. **Recording starten**: `./serial_capture -p /dev/ttyACM0 -o aufnahme.bin`
-3. **KC87 Tape abspielen**: GPIO 3 mit KC87-Kassettenausgang verbinden
-4. **Recording endet automatisch** nach 5 s Inaktivität
-5. **Analyse**: `python3 tools/analyze_bin.py aufnahme.bin`
+2. **Aufnahme starten**: `kc87tool record /dev/ttyACM0 --sec 30 --out aufnahme`
+3. **Programm-Save am KC87 starten** (Signal an GPIO 2)
+4. **Auswerten**: Analyse und Dekodierung laufen nach der Aufnahme automatisch; später erneut mit `kc87tool analyze aufnahme.csv` und `kc87tool decode aufnahme.csv --tap aufnahme.tap`
+5. **Im Emulator laden**: die erzeugte `.tap`-Datei (z. B. in JKCEMU)
 
 ## Bekannte Einschränkungen
 
-- Playback-Funktionalität ist noch nicht in der Firmware implementiert
-- Maximale Delta-Zeit pro Sample: 32767 μs (~32 ms) — längere Pausen werden auf diesen Wert begrenzt
-- Bei sehr hoher Flankenfrequenz kann die serielle USB-Übertragung zum Engpass werden
+- Playback-Funktionalität ist noch nicht implementiert
+- Die Aufnahmedauer wird vom PC festgelegt (`--sec`), es gibt keinen automatischen Stopp nach Inaktivität
+- Dekodiert und geprüft ist bisher nur eine `CSAVE`-Aufnahme (BASIC). Maschinencode-Dateien sind nicht getestet, die Header-Felder werden nicht ausgewertet.
+- Als Exportformat gibt es nur TAP (mit JKCEMU 0.9.9.1 getestet, mit einem BASIC-Programm). Die Formate KCC und SSS gibt es nicht.
+- Der Ringpuffer fasst 8192 Messwerte; bei sehr hoher Pulsrate und blockierter USB-Verbindung kann er überlaufen (Status-Bit 0)
