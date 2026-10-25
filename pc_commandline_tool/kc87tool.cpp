@@ -13,6 +13,9 @@
 //   kc87tool analyze <datei.csv>                          Statistik
 //   kc87tool decode <datei.csv> [--tap datei.tap]         Bloecke + Programmname, optional TAP schreiben
 //   kc87tool wav <datei.csv> [--rate 44100]               Rechtecksignal als WAV
+//   kc87tool encode <datei.tap> [--out datei.csv]         TAP -> Pulsfolge (CSV), wie vom KC-87 geschrieben
+//   kc87tool fromwav <datei.wav> [--out datei.csv]        WAV-Aufnahme -> Pulsfolge (CSV)
+//   kc87tool play <port> <datei.csv|.tap|.wav>            Pulsfolge ueber den Pico an den KC-87 ausgeben
 
 #include <algorithm>
 #include <chrono>
@@ -110,12 +113,18 @@ public:
 #endif
     }
     void write(const void* p, size_t len) {
+        const uint8_t* b = (const uint8_t*)p;
+        while (len > 0) {       // blockiert, solange der Pico nichts annimmt (Flusskontrolle)
 #ifdef _WIN32
-        DWORD n = 0;
-        WriteFile(h_, p, (DWORD)len, &n, nullptr);
+            DWORD n = 0;
+            if (!WriteFile(h_, b, (DWORD)len, &n, nullptr)) throw std::runtime_error("Schreibfehler");
 #else
-        if (::write(fd_, p, len) < 0) throw std::runtime_error("Schreibfehler");
+            ssize_t n = ::write(fd_, b, len);
+            if (n < 0) throw std::runtime_error("Schreibfehler");
 #endif
+            b += n;
+            len -= (size_t)n;
+        }
     }
 
 private:
@@ -447,12 +456,226 @@ static void to_wav(const std::string& csv, uint32_t rate) {
 }
 
 // ---------------------------------------------------------------------------
+// encode (TAP -> Pulsfolge) und play
+// ---------------------------------------------------------------------------
+// Pulsdauern wie in einer echten KC-87-Aufnahme gemessen (siehe Bandformat):
+// jedes Symbol besteht aus zwei gleich langen Pulsen.
+static constexpr double BIT0_US = 250.0;
+static constexpr double BIT1_US = 455.0;
+static constexpr double SEP_US = 870.0;
+static constexpr int VORTON_FIRST = 6000;   // Perioden vor dem ersten Block
+static constexpr int VORTON_NEXT = 160;     // Perioden vor jedem weiteren Block
+static constexpr int VORTON_END = 160;      // Perioden nach dem letzten Block
+
+static std::vector<Pulse> encode_tap(const std::string& tap) {
+    std::ifstream f(tap, std::ios::binary);
+    if (!f) throw std::runtime_error("Kann " + tap + " nicht lesen");
+    std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    static const char HEAD[17] = "\xC3KC-TAPE by AF. ";
+    if (d.size() < 16 || std::memcmp(d.data(), HEAD, 16) != 0)
+        throw std::runtime_error(tap + " ist keine TAP-Datei (Kennung fehlt)");
+    const size_t rec = 1 + BLOCK_DATA;
+    if ((d.size() - 16) % rec != 0)
+        std::printf("WARNUNG: TAP-Groesse passt nicht zu ganzen Bloecken, Rest wird ignoriert\n");
+
+    std::vector<Pulse> p;
+    auto period = [&](double us) { p.push_back({true, us}); p.push_back({false, us}); };
+    size_t nblocks = (d.size() - 16) / rec;
+    for (size_t b = 0; b < nblocks; ++b) {
+        const uint8_t* r = &d[16 + b * rec];
+        std::vector<uint8_t> bytes(r, r + rec);
+        uint8_t sum = 0;
+        for (size_t i = 1; i <= BLOCK_DATA; ++i) sum = (uint8_t)(sum + r[i]);
+        bytes.push_back(sum);
+        for (int i = 0; i < (b == 0 ? VORTON_FIRST : VORTON_NEXT); ++i) period(BIT1_US);
+        for (uint8_t v : bytes) {
+            period(SEP_US);
+            for (int k = 0; k < 8; ++k) period((v >> k) & 1 ? BIT1_US : BIT0_US);
+        }
+        period(SEP_US);     // Trennzeichen nach dem letzten Byte des Blocks
+    }
+    // Nach dem letzten Block noch ein kurzer Vorton: der KC-87 schliesst den Block erst
+    // mit der naechsten Flanke ab (auf dem echten Band folgt dort der naechste Vorton).
+    for (int i = 0; i < VORTON_END; ++i) period(BIT1_US);
+    std::printf("%zu Bloecke, %zu Pulse, Dauer %.1f s\n", nblocks, p.size(),
+                [&] { double t = 0; for (auto& x : p) t += x.us; return t / 1e6; }());
+    return p;
+}
+
+// ---------------------------------------------------------------------------
+// WAV -> Pulsfolge
+// ---------------------------------------------------------------------------
+// Liest eine WAV-Datei (PCM 8/16/24/32 Bit oder Float32, erster Kanal) und macht daraus
+// die Pulsfolge: die Nulldurchgaenge werden mit Hysterese (10 % der Spitze) gesucht und
+// linear zwischen den Abtastwerten interpoliert, damit auch bei 44,1 kHz die Pulsdauern
+// auf wenige us genau bleiben. Die Polaritaet spielt keine Rolle, da die Daten in den
+// Pulsdauern stecken.
+static std::vector<Pulse> pulses_from_wav(const std::string& file) {
+    std::ifstream f(file, std::ios::binary);
+    if (!f) throw std::runtime_error("Kann " + file + " nicht lesen");
+    std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    auto u16 = [&](size_t o) { return (uint32_t)d[o] | (uint32_t)d[o + 1] << 8; };
+    auto u32 = [&](size_t o) { return u16(o) | u16(o + 2) << 16; };
+    if (d.size() < 44 || std::memcmp(d.data(), "RIFF", 4) != 0 || std::memcmp(&d[8], "WAVE", 4) != 0)
+        throw std::runtime_error(file + " ist keine WAV-Datei");
+
+    uint32_t fmt = 0, ch = 0, rate = 0, bits = 0;
+    size_t data_off = 0, data_len = 0;
+    for (size_t o = 12; o + 8 <= d.size();) {
+        size_t len = u32(o + 4);
+        if (std::memcmp(&d[o], "fmt ", 4) == 0 && o + 24 <= d.size()) {
+            fmt = u16(o + 8); ch = u16(o + 10); rate = u32(o + 12); bits = u16(o + 22);
+            if (fmt == 0xFFFE && len >= 26 && o + 8 + 26 <= d.size()) fmt = u16(o + 8 + 24);   // WAVE_FORMAT_EXTENSIBLE
+        } else if (std::memcmp(&d[o], "data", 4) == 0) {
+            data_off = o + 8;
+            data_len = std::min(len, d.size() - data_off);
+            break;
+        }
+        o += 8 + len + (len & 1);
+    }
+    if (!data_off || !ch || !rate) throw std::runtime_error("WAV-Kopf unvollstaendig");
+    bool is_float = (fmt == 3 && bits == 32);
+    if (!(fmt == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32)) && !is_float)
+        throw std::runtime_error("WAV-Format nicht unterstuetzt (PCM 8/16/24/32 Bit oder Float32)");
+
+    size_t bps = bits / 8, frame = bps * ch, n = data_len / frame;
+    std::vector<float> x(n);
+    for (size_t i = 0; i < n; ++i) {
+        const uint8_t* q = &d[data_off + i * frame];
+        double v;
+        if (is_float) { float t; std::memcpy(&t, q, 4); v = t; }
+        else if (bits == 8) v = (q[0] - 128) / 128.0;
+        else if (bits == 16) v = (int16_t)(q[0] | q[1] << 8) / 32768.0;
+        else if (bits == 24) v = (int32_t)((uint32_t)q[0] << 8 | (uint32_t)q[1] << 16 | (uint32_t)q[2] << 24) / 2147483648.0;
+        else v = (int32_t)(q[0] | q[1] << 8 | q[2] << 16 | (uint32_t)q[3] << 24) / 2147483648.0;
+        x[i] = (float)v;
+    }
+    if (n < 2) throw std::runtime_error("WAV enthaelt keine Daten");
+
+    double mean = 0;
+    for (float v : x) mean += v;
+    mean /= (double)n;
+    for (float& v : x) v = (float)(v - mean);
+    std::vector<float> a(x.size());
+    for (size_t i = 0; i < n; ++i) a[i] = std::fabs(x[i]);
+    std::nth_element(a.begin(), a.begin() + (long)(n * 995 / 1000), a.end());
+    double peak = a[n * 995 / 1000];
+    if (peak < 1e-4) throw std::runtime_error("WAV ist praktisch stumm");
+    double th = 0.1 * peak;
+
+    std::vector<Pulse> p;
+    int state = 0;                 // 0 = unbekannt, 1 = positiv, -1 = negativ
+    double last_cross = 0, prev_edge = -1;
+    bool prev_high = false;
+    for (size_t i = 1; i < n; ++i) {
+        if ((x[i - 1] < 0) != (x[i] < 0))
+            last_cross = (double)(i - 1) + x[i - 1] / (double)(x[i - 1] - x[i]);   // interpolierter Nulldurchgang
+        int ns = x[i] > th ? 1 : (x[i] < -th ? -1 : state);
+        if (ns == state) continue;
+        if (state != 0) {                       // echte Flanke (nicht der erste Pegel)
+            if (prev_edge >= 0) p.push_back({prev_high, (last_cross - prev_edge) * 1e6 / rate});
+            prev_edge = last_cross;
+            prev_high = (ns == 1);
+        }
+        state = ns;
+    }
+    if (!p.empty() && !p.front().high) p.erase(p.begin());   // Folge beginnt mit einem High-Puls
+    std::printf("WAV: %u Hz, %u Bit, %zu Kanaele, %.1f s, %zu Pulse\n", rate, bits, (size_t)ch,
+                (double)n / rate, p.size());
+    if (p.empty()) throw std::runtime_error("Keine Flanken in der WAV-Datei gefunden");
+    return p;
+}
+
+static std::vector<Pulse> load_pulses(const std::string& file) {
+    auto ends = [&](const char* e) {
+        size_t n = std::strlen(e);
+        return file.size() >= n && file.compare(file.size() - n, n, e) == 0;
+    };
+    if (ends(".tap") || ends(".TAP")) return encode_tap(file);
+    if (ends(".wav") || ends(".WAV")) {
+        auto p = pulses_from_wav(file);
+        // Kurzer Vorton am Ende, damit der KC-87 den letzten Block mit einer Flanke abschliesst
+        bool next_high = !p.back().high;
+        for (int i = 0; i < 2 * VORTON_END; ++i, next_high = !next_high) p.push_back({next_high, BIT1_US});
+        return p;
+    }
+    return load_csv(file);
+}
+
+static void play(const std::string& port, const std::string& file) {
+    using clk = std::chrono::steady_clock;
+    auto p = load_pulses(file);
+    if (!p.empty() && !p.front().high) {
+        std::printf("Hinweis: erster Puls ist Low, wird uebersprungen\n");
+        p.erase(p.begin());
+    }
+    if (p.empty()) throw std::runtime_error("Keine Daten zum Abspielen");
+
+    SerialPort sp(port);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    uint8_t tmp[4096];
+    while (sp.read(tmp, sizeof tmp) > 0) {}      // Altes verwerfen
+
+    sp.write("P", 1);
+    uint8_t hdr[8];
+    size_t got = 0;
+    auto t0 = clk::now();
+    while (got < 8 && clk::now() - t0 < std::chrono::seconds(3)) got += sp.read(hdr + got, 8 - got);
+    std::vector<uint8_t> h(hdr, hdr + got);
+    if (got < 8 || rd32(h, 0) != MAGIC)
+        throw std::runtime_error("Kein gueltiger Header - laeuft die Firmware mit Wiedergabe auf dem Pico?");
+    double tick_hz = rd32(h, 4);
+
+    double total_us = 0;
+    for (auto& x : p) total_us += x.us;
+    std::printf("Wiedergabe: %zu Pulse, ca. %.1f s - jetzt am KC-87 den Ladevorgang starten (CLOAD / LOAD)\n",
+                p.size(), total_us / 1e6);
+
+    std::vector<uint8_t> buf;
+    buf.reserve(p.size() * 4 + 4);
+    for (auto& x : p) {
+        uint32_t t = (uint32_t)std::llround(x.us * tick_hz / 1e6);
+        if (t >= END_MARKER) t = END_MARKER - 1;
+        for (int k = 0; k < 4; ++k) buf.push_back((uint8_t)(t >> (8 * k)));
+    }
+    for (int k = 0; k < 4; ++k) buf.push_back(0xFF);
+
+    const size_t CHUNK = 1024;
+    auto next_info = clk::now() + std::chrono::seconds(1);
+    for (size_t off = 0; off < buf.size(); off += CHUNK) {
+        sp.write(&buf[off], std::min(CHUNK, buf.size() - off));
+        if (clk::now() >= next_info) {
+            std::printf("  gesendet %3d %%\r", (int)(100.0 * off / buf.size()));
+            std::fflush(stdout);
+            next_info += std::chrono::seconds(1);
+        }
+    }
+    std::printf("  gesendet 100 %%, warte auf Ende der Ausgabe ...\n");
+
+    std::vector<uint8_t> tr;
+    auto give_up = clk::now() + std::chrono::seconds(30);
+    while (tr.size() < 12 && clk::now() < give_up) {
+        size_t n = sp.read(tmp, sizeof tmp);
+        tr.insert(tr.end(), tmp, tmp + n);
+    }
+    if (tr.size() < 12 || rd32(tr, 0) != END_MARKER)
+        throw std::runtime_error("Keine Abschlussmeldung vom Pico empfangen");
+    uint32_t status = rd32(tr, 4), count = rd32(tr, 8);
+    if (status & 1u) std::printf("WARNUNG: Pico-Puffer lief leer (Unterlauf) - Zeiten gestoert\n");
+    if (status & 2u) std::printf("WARNUNG: Wiedergabe abgebrochen (Timeout oder USB getrennt)\n");
+    std::printf("Fertig: %u Pulse ausgegeben\n", count);
+}
+
+// ---------------------------------------------------------------------------
 static void usage() {
     std::cout << "Benutzung:\n"
                  "  kc87tool record <port> [--sec 30] [--out aufnahme]\n"
                  "  kc87tool analyze <datei.csv>\n"
                  "  kc87tool decode <datei.csv> [--tap datei.tap]\n"
-                 "  kc87tool wav <datei.csv> [--rate 44100]\n";
+                 "  kc87tool wav <datei.csv> [--rate 44100]\n"
+                 "  kc87tool encode <datei.tap> [--out datei.csv]\n"
+                 "  kc87tool fromwav <datei.wav> [--out datei.csv]\n"
+                 "  kc87tool play <port> <datei.csv|datei.tap|datei.wav>\n";
 }
 
 int main(int argc, char** argv) {
@@ -460,7 +683,8 @@ int main(int argc, char** argv) {
         if (argc < 3) { usage(); return 1; }
         std::string cmd = argv[1], arg = argv[2];
         std::map<std::string, std::string> opt;
-        for (int i = 3; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
+        int first_opt = (cmd == "play") ? 4 : 3;
+        for (int i = first_opt; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
         auto get = [&](const char* k, const char* d) { return opt.count(k) ? opt[k] : std::string(d); };
 
         if (cmd == "record") {
@@ -474,6 +698,19 @@ int main(int argc, char** argv) {
             if (opt.count("--tap")) write_tap(opt["--tap"], blocks);
         } else if (cmd == "wav") {
             to_wav(arg, (uint32_t)std::stoul(get("--rate", "44100")));
+        } else if (cmd == "encode") {
+            auto p = encode_tap(arg);
+            std::string out = get("--out", (base_name(arg) + ".csv").c_str());
+            save_csv(out, p);
+            std::printf("Pulsfolge geschrieben: %s\n", out.c_str());
+        } else if (cmd == "fromwav") {
+            auto p = pulses_from_wav(arg);
+            std::string out = get("--out", (base_name(arg) + ".csv").c_str());
+            save_csv(out, p);
+            std::printf("Pulsfolge geschrieben: %s\n", out.c_str());
+        } else if (cmd == "play") {
+            if (argc < 4) { usage(); return 1; }
+            play(arg, argv[3]);
         } else {
             usage();
             return 1;

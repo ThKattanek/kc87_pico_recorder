@@ -6,7 +6,7 @@ KC87 Kassetten-Recorder Emulator mit Raspberry Pi Pico (RP2040) oder Pico 2 (RP2
 
 **✅ Recording (Aufnahme): funktional**  
 **✅ Auswertung am PC: Blöcke, Prüfsummen, BASIC-Programmname, TAP-Export** (in JKCEMU geladen und gestartet)  
-❌ Playback (Wiedergabe): Noch nicht implementiert
+✅ Playback (Wiedergabe): TAP/CSV → Pico → KC87, BASIC-Programme (auch mit 72 Blöcken aus einer WAV-Datei) wurden am echten KC87 geladen
 
 ## Projektstruktur
 
@@ -24,7 +24,7 @@ kc87_pico_recorder/
 
 - Raspberry Pi Pico (RP2040) oder Pico 2 (RP2350), optional mit Debug-Probe
 - **GPIO 2**: Eingang für das KC87-Signal (KC87 → Pico, Programm-Save)
-- **GPIO 3**: Playback-Ausgang (`PLAY_SIGNAL_PICO` — Pico → KC87), im Schaltplan vorgesehen, in der Firmware noch nicht implementiert
+- **GPIO 3**: Playback-Ausgang (`PLAY_SIGNAL_PICO` — Pico → KC87)
 
 Maßgeblich für die Pinbelegung ist der Schaltplan in `hardware/`.
 
@@ -35,7 +35,8 @@ Maßgeblich für die Pinbelegung ist der Schaltplan in `hardware/`.
 - Timing-Auflösung: 0,2 µs (5 MHz Zähltakt, 32-Bit-Zähler)
 - Die Messwerte laufen per DMA in einen 32-KB-Ringpuffer; daher gehen auch bei kurzen USB-Verzögerungen keine Pulse verloren
 - Übertragung über USB-CDC (siehe [PROTOCOL.md](PROTOCOL.md))
-- Gesteuert vom PC: `S` startet die Aufnahme, `X` beendet sie
+- Gesteuert vom PC: `S` startet die Aufnahme, `X` beendet sie, `P` startet die Wiedergabe
+- Wiedergabe: der PC schickt die Pulsdauern, ein PIO-Programm (`firmware/pulse_out.pio`, 0,2 µs Auflösung) gibt sie an GP3 aus. Der Pico sammelt zuerst 2048 Pulse vor, die USB-Verbindung bremst den PC, wenn der Puffer voll ist. Am Ende bleibt der Ausgang auf Low.
 
 ### Protokoll (Kurzfassung)
 
@@ -47,6 +48,7 @@ Alle Wörter sind `uint32` little-endian:
 | Pico → PC | Header: `"KC87"` (`0x3738434B`), `tick_hz` |
 | Pico → PC | Daten: Dauer in Ticks, abwechselnd High, Low, High, … |
 | Pico → PC | Ende: `0xFFFFFFFF`, Status, Anzahl Werte |
+| PC → Pico | `'P'` Wiedergabe: Pico antwortet mit dem Header, dann sendet der PC die Dauern und `0xFFFFFFFF` (Details in [PROTOCOL.md](PROTOCOL.md)) |
 
 Status: Bit 0 = Ringpuffer-Überlauf, Bit 1 = PIO-Stall.
 
@@ -74,12 +76,18 @@ kc87tool record <port> [--sec 30] [--out aufnahme]   # z.B. COM5 oder /dev/ttyAC
 kc87tool analyze <datei.csv>                          # Statistik
 kc87tool decode <datei.csv> [--tap datei.tap]         # Blöcke + Programmname, optional TAP-Datei
 kc87tool wav <datei.csv> [--rate 44100]               # Rechtecksignal als WAV
+kc87tool encode <datei.tap> [--out datei.csv]         # TAP -> Pulsfolge
+kc87tool fromwav <datei.wav> [--out datei.csv]        # WAV-Aufnahme -> Pulsfolge
+kc87tool play <port> <datei.csv|.tap|.wav>            # über den Pico an den KC87 ausgeben
 ```
 
 - **record**: sendet `S`, zeichnet `--sec` Sekunden auf (Standard 30), sendet `X` und speichert die Pulse als `<out>.csv`. Danach werden automatisch `analyze` und `decode` ausgeführt; dabei entsteht auch `<out>.tap`. Meldet Ringpuffer-Überlauf, PIO-Stall oder fehlenden Endmarker als Warnung.
 - **analyze**: gibt Min/Median/Max für High, Low und Periodendauer aus, sowie die häufigsten Periodenlängen.
 - **decode**: zerlegt das Bandsignal in Bytes und Blöcke (siehe [Bandformat](#bandformat)). Zeigt je Block Nummer und Prüfsummen-Status, bei BASIC-Programmen auch den Programmnamen. Mit `--tap <datei>` werden alle Blöcke mit gültiger Prüfsumme als TAP-Datei geschrieben, damit sie in einem Emulator geladen werden können (mit JKCEMU 0.9.9.1 getestet: laden und starten funktioniert). Blöcke mit falscher Prüfsumme werden übersprungen.
 - **wav**: erzeugt `<name>.wav` (8 Bit, Mono) aus der CSV-Datei.
+- **encode**: wandelt eine TAP-Datei in die Pulsfolge um, wie der KC87 sie auf Band schreibt (Vorton, Trennzeichen, Bytes, Prüfsumme). Zur Kontrolle lässt sich das Ergebnis mit `decode` wieder zurücklesen.
+- **fromwav**: liest eine WAV-Aufnahme (PCM 8/16/24/32 Bit oder Float32, bei mehreren Kanälen der erste) und wandelt sie in die Pulsfolge um. Die Nulldurchgänge werden mit Hysterese gesucht und zwischen den Abtastwerten interpoliert, dadurch reichen auch niedrige Abtastraten. Die Polarität ist egal. Mit `decode --tap` lässt sich daraus eine TAP-Datei machen.
+- **play**: sendet eine `.tap`-, `.wav`- oder `.csv`-Datei an den Pico, der sie an GPIO 3 ausgibt. Vorher am KC87 den Ladevorgang starten (z. B. `CLOAD`/`LOAD`). Die Wiedergabe dauert so lange wie die Originalaufnahme (der erste Vorton allein ca. 5,5 s). Warnt bei Pufferunterlauf oder Abbruch. Bei WAV-Dateien hängt `play` am Ende einen kurzen Vorton an, damit der KC87 den letzten Block abschließt.
 
 CSV-Format: Kopfzeile `level;dauer_us`, danach je Zeile `1;<µs>` (High) oder `0;<µs>` (Low).
 
@@ -149,10 +157,11 @@ Alternativ ohne CMake: `g++ -std=c++17 -O2 -o kc87tool kc87tool.cpp` (unter Wind
 3. **Programm-Save am KC87 starten** (Signal an GPIO 2)
 4. **Auswerten**: Analyse und Dekodierung laufen nach der Aufnahme automatisch; später erneut mit `kc87tool analyze aufnahme.csv` und `kc87tool decode aufnahme.csv --tap aufnahme.tap`
 5. **Im Emulator laden**: die erzeugte `.tap`-Datei (z. B. in JKCEMU)
+6. **Auf den KC87 laden**: Pegel mit `kc87_play_test` einstellen, am KC87 den Ladevorgang starten, dann `kc87tool play /dev/ttyACM0 aufnahme.tap`
 
 ## Bekannte Einschränkungen
 
-- Playback-Funktionalität ist noch nicht implementiert
+- Playback ist am echten KC87 mit einem kurzen BASIC-Programm und mit einer WAV-Datei des Programms AIRWOLF (BASIC, 72 Blöcke, ca. 80 s) getestet, jeweils über `CLOAD`. Maschinencode (`LOAD`) fehlt noch. Die Pulsdauern und Vorton-Längen stammen aus der Aufnahme. Nach dem letzten Block hängt `encode` einen kurzen Vorton an, weil der KC87 den Block erst mit der nächsten Flanke abschließt. Bei `.csv`-Dateien kommt das Ende aus der Aufnahme.
 - Die Aufnahmedauer wird vom PC festgelegt (`--sec`), es gibt keinen automatischen Stopp nach Inaktivität
 - Dekodiert und geprüft ist bisher nur eine `CSAVE`-Aufnahme (BASIC). Maschinencode-Dateien sind nicht getestet, die Header-Felder werden nicht ausgewertet.
 - Als Exportformat gibt es nur TAP (mit JKCEMU 0.9.9.1 getestet, mit einem BASIC-Programm). Die Formate KCC und SSS gibt es nicht.

@@ -25,6 +25,7 @@ pico_sdk_init()
 
 add_executable(kc87_logger main.c)
 pico_generate_pio_header(kc87_logger ${CMAKE_CURRENT_LIST_DIR}/pulse_timer.pio)
+pico_generate_pio_header(kc87_logger ${CMAKE_CURRENT_LIST_DIR}/pulse_out.pio)
 
 target_link_libraries(kc87_logger pico_stdlib hardware_pio hardware_dma hardware_clocks)
 
