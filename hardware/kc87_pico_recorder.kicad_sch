@@ -6,7 +6,7 @@
 	(paper "A4")
 	(title_block
 		(title "KC87 Pico Recorder")
-		(date "2025-11-22")
+		(date "2026-10-25")
 		(rev "0.2")
 		(company "Thorsten Kattanek")
 	)
@@ -2531,7 +2531,7 @@
 	)
 	(rectangle
 		(start 20.955 88.9)
-		(end 142.24 142.875)
+		(end 156.845 144.78)
 		(stroke
 			(width 0)
 			(type default)
@@ -2585,7 +2585,7 @@
 		)
 		(uuid "36ea2237-70d8-4a3f-bbb5-8a29667776e1")
 	)
-	(text "Zum einstellen des Ausgangs ein Rechtecksignal 3.3V PP an PLAY_SIGNAL_PICO anlegen oder per Programm erzeugen.\nKC87 Einschalten und PLAY_SIGNAL messen und am POTI solange drehen bis ca. 800mV eingestellt sind."
+	(text "Einstellen des Pegels: Rechtecksignal 3,3V PP an PLAY_SIGNAL_PICO anlegen (Test-Firmware kc87_play_test oder Playback-Programm).\nPLAY_SIGNAL mit dem Oszilloskop messen und mit RV2 auf ca. 250mV PP einstellen (Bereich ca. 200 bis 295mV PP)\n(KC87-Eingang: Re = 10k, Ue_ss min. 24mV; Recorder-Norm min. 200mV).\nR4 + RV2 bilden zusammen mit R5 einen Spannungsteiler, die Quellimpedanz am KC87 betraegt maximal ca. 180 Ohm."
 		(exclude_from_sim no)
 		(at 21.844 139.7 0)
 		(effects
@@ -2650,7 +2650,7 @@
 		(uuid "2f49332f-b2e8-498f-8dbc-0d5a3d980c8b")
 	)
 	(junction
-		(at 77.47 114.3)
+		(at 76.2 119.38)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "3838b003-e676-4d40-9177-64c719121395")
@@ -2684,6 +2684,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "b7714637-9f90-4b38-b504-8d3ded062c20")
+	)
+	(junction
+		(at 90.17 105.41)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "d6175265-67e9-4025-833a-454953824a24")
 	)
 	(junction
 		(at 167.64 49.53)
@@ -2827,6 +2833,16 @@
 	)
 	(wire
 		(pts
+			(xy 81.28 105.41) (xy 99.06 105.41)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "03ee1a63-8de1-409c-a33f-c5146dabf4cd")
+	)
+	(wire
+		(pts
 			(xy 69.85 39.37) (xy 69.85 35.56)
 		)
 		(stroke
@@ -2837,7 +2853,7 @@
 	)
 	(wire
 		(pts
-			(xy 64.77 114.3) (xy 67.31 114.3)
+			(xy 63.5 119.38) (xy 66.04 119.38)
 		)
 		(stroke
 			(width 0)
@@ -2887,13 +2903,13 @@
 	)
 	(wire
 		(pts
-			(xy 88.9 99.06) (xy 82.55 99.06)
+			(xy 90.17 115.57) (xy 90.17 119.38)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "2a42be33-3578-4ade-85c4-64a69842991b")
+		(uuid "2a8bb095-2d28-4f42-b6f1-8ad7778cc501")
 	)
 	(polyline
 		(pts
@@ -2937,16 +2953,6 @@
 	)
 	(wire
 		(pts
-			(xy 77.47 124.46) (xy 77.47 125.73)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "440d7569-798c-454c-ac91-d41c8d2661ec")
-	)
-	(wire
-		(pts
 			(xy 96.52 46.99) (xy 96.52 38.1)
 		)
 		(stroke
@@ -2987,7 +2993,7 @@
 	)
 	(wire
 		(pts
-			(xy 82.55 99.06) (xy 82.55 102.87)
+			(xy 81.28 105.41) (xy 81.28 107.95)
 		)
 		(stroke
 			(width 0)
@@ -3057,7 +3063,7 @@
 	)
 	(wire
 		(pts
-			(xy 77.47 106.68) (xy 77.47 114.3)
+			(xy 76.2 111.76) (xy 76.2 119.38)
 		)
 		(stroke
 			(width 0)
@@ -3157,7 +3163,7 @@
 	)
 	(wire
 		(pts
-			(xy 78.74 106.68) (xy 77.47 106.68)
+			(xy 77.47 111.76) (xy 76.2 111.76)
 		)
 		(stroke
 			(width 0)
@@ -3177,7 +3183,7 @@
 	)
 	(wire
 		(pts
-			(xy 74.93 114.3) (xy 77.47 114.3)
+			(xy 73.66 119.38) (xy 76.2 119.38)
 		)
 		(stroke
 			(width 0)
@@ -3197,13 +3203,23 @@
 	)
 	(wire
 		(pts
-			(xy 82.55 114.3) (xy 82.55 110.49)
+			(xy 81.28 119.38) (xy 81.28 115.57)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
 		(uuid "9fb0fe25-2fdc-4f8b-84a7-889d68ead680")
+	)
+	(wire
+		(pts
+			(xy 90.17 105.41) (xy 90.17 107.95)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a4c1d987-f5b2-49ff-bf3b-03e911e6f4ac")
 	)
 	(wire
 		(pts
@@ -3327,23 +3343,13 @@
 	)
 	(wire
 		(pts
-			(xy 77.47 114.3) (xy 82.55 114.3)
+			(xy 76.2 119.38) (xy 81.28 119.38)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
 		(uuid "e5a9cf53-8127-48f3-938e-cd0d3d79c0ac")
-	)
-	(wire
-		(pts
-			(xy 77.47 114.3) (xy 77.47 116.84)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "e8a077d3-e9a9-4188-b86b-5e4dd719920c")
 	)
 	(wire
 		(pts
@@ -3469,9 +3475,9 @@
 			)
 		)
 	)
-	(global_label "PLAY_SINGAL_PICO"
+	(global_label "PLAY_SIGNAL_PICO"
 		(shape input)
-		(at 64.77 114.3 180)
+		(at 63.5 119.38 180)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -3481,7 +3487,7 @@
 		)
 		(uuid "29f08cd0-3aae-4533-a39b-9e8ea24daa4b")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 44.3675 114.3 0)
+			(at 43.0975 119.38 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3493,9 +3499,9 @@
 			)
 		)
 	)
-	(global_label "PLAY_SINGAL"
+	(global_label "PLAY_SIGNAL"
 		(shape output)
-		(at 88.9 99.06 0)
+		(at 99.06 105.41 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -3505,7 +3511,7 @@
 		)
 		(uuid "424129de-238d-419b-8b02-15d39e8232ad")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 103.8596 99.06 0)
+			(at 114.0196 105.41 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3517,7 +3523,7 @@
 			)
 		)
 	)
-	(global_label "PLAY_SINGAL"
+	(global_label "PLAY_SIGNAL"
 		(shape input)
 		(at 40.64 173.99 180)
 		(fields_autoplaced yes)
@@ -3541,7 +3547,7 @@
 			)
 		)
 	)
-	(global_label "PLAY_SINGAL_PICO"
+	(global_label "PLAY_SIGNAL_PICO"
 		(shape output)
 		(at 220.98 74.93 180)
 		(fields_autoplaced yes)
@@ -3873,7 +3879,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 71.12 114.3 90)
+		(at 69.85 119.38 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3884,7 +3890,7 @@
 		(fields_autoplaced yes)
 		(uuid "237f41ce-c41a-4594-96dc-aef7e7375a22")
 		(property "Reference" "R4"
-			(at 71.12 107.95 90)
+			(at 69.85 113.03 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3893,8 +3899,8 @@
 				)
 			)
 		)
-		(property "Value" "3k3"
-			(at 71.12 110.49 90)
+		(property "Value" "1k8"
+			(at 69.85 115.57 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3904,7 +3910,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 71.12 116.078 90)
+			(at 69.85 121.158 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3915,7 +3921,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 71.12 114.3 0)
+			(at 69.85 119.38 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3926,7 +3932,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 71.12 114.3 0)
+			(at 69.85 119.38 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4128,7 +4134,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 77.47 125.73 0)
+		(at 90.17 119.38 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -4139,7 +4145,7 @@
 		(fields_autoplaced yes)
 		(uuid "295a49e5-1c0e-4181-960f-76039fee47ab")
 		(property "Reference" "#PWR011"
-			(at 77.47 132.08 0)
+			(at 90.17 125.73 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4150,7 +4156,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 77.47 130.81 0)
+			(at 90.17 124.46 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -4160,7 +4166,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 77.47 125.73 0)
+			(at 90.17 119.38 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4171,7 +4177,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 77.47 125.73 0)
+			(at 90.17 119.38 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4182,7 +4188,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 77.47 125.73 0)
+			(at 90.17 119.38 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5784,7 +5790,7 @@
 	)
 	(symbol
 		(lib_id "Device:R_Potentiometer")
-		(at 82.55 106.68 180)
+		(at 81.28 111.76 180)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -5795,7 +5801,7 @@
 		(fields_autoplaced yes)
 		(uuid "dc063b9f-777e-4014-90b3-f84c777d3204")
 		(property "Reference" "RV2"
-			(at 85.09 105.4099 0)
+			(at 83.82 110.4899 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5805,8 +5811,8 @@
 				(justify right)
 			)
 		)
-		(property "Value" "10k"
-			(at 85.09 107.9499 0)
+		(property "Value" "1k"
+			(at 83.82 113.0299 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5817,7 +5823,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 82.55 106.68 0)
+			(at 81.28 111.76 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5828,7 +5834,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 82.55 106.68 0)
+			(at 81.28 111.76 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5839,7 +5845,7 @@
 			)
 		)
 		(property "Description" "Potentiometer"
-			(at 82.55 106.68 0)
+			(at 81.28 111.76 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6205,7 +6211,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 77.47 120.65 0)
+		(at 90.17 111.76 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -6216,7 +6222,7 @@
 		(fields_autoplaced yes)
 		(uuid "f2481326-7fe1-4133-a85b-296b70c34be8")
 		(property "Reference" "R5"
-			(at 80.01 119.3799 0)
+			(at 92.71 110.4899 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6226,8 +6232,8 @@
 				(justify left)
 			)
 		)
-		(property "Value" "1k"
-			(at 80.01 121.9199 0)
+		(property "Value" "180"
+			(at 92.71 113.0299 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6238,7 +6244,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 75.692 120.65 90)
+			(at 88.392 111.76 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6249,7 +6255,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 77.47 120.65 0)
+			(at 90.17 111.76 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6260,7 +6266,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 77.47 120.65 0)
+			(at 90.17 111.76 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

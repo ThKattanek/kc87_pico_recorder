@@ -24,7 +24,7 @@ kc87_pico_recorder/
 
 - Raspberry Pi Pico (RP2040) oder Pico 2 (RP2350), optional mit Debug-Probe
 - **GPIO 2**: Eingang für das KC87-Signal (KC87 → Pico, Programm-Save)
-- **GPIO 3**: Playback-Ausgang (`PLAY_SINGAL_PICO` — Pico → KC87), im Schaltplan vorgesehen, in der Firmware noch nicht implementiert
+- **GPIO 3**: Playback-Ausgang (`PLAY_SIGNAL_PICO` — Pico → KC87), im Schaltplan vorgesehen, in der Firmware noch nicht implementiert
 
 Maßgeblich für die Pinbelegung ist der Schaltplan in `hardware/`.
 
@@ -49,6 +49,21 @@ Alle Wörter sind `uint32` little-endian:
 | Pico → PC | Ende: `0xFFFFFFFF`, Status, Anzahl Werte |
 
 Status: Bit 0 = Ringpuffer-Überlauf, Bit 1 = PIO-Stall.
+
+### Test-Firmware für den PLAY-Pegel
+
+`firmware/play_test.c` (Target `kc87_play_test`, eigene `.uf2`-Datei) gibt an GPIO 3 ein Rechtecksignal mit 50 % Tastverhältnis aus. Damit lässt sich der Pegel der PLAY-Schaltung einstellen, noch ohne Playback-Software: PLAY_SIGNAL mit dem Oszilloskop messen und mit RV2 auf ca. 250 mV PP abgleichen (Einstellbereich ca. 200 bis 295 mV PP) (KC87-Eingang: Re = 10 kΩ, mind. 24 mV PP). Die Frequenzen sind die Sollwerte des KC87 (laut [Kassetteninterface](https://hc-ddr.hucki.net/wiki/doku.php/z9001/software/os/kassetteninterface)); am echten KC87 habe ich etwas niedrigere Werte gemessen (siehe [Bandformat](#bandformat)). Nach dem Start läuft der Wechsel zwischen 1,2 und 2,4 kHz (je 1 s).
+
+Steuerung über die USB-Schnittstelle (z. B. mit `picocom -b 115200 /dev/ttyACM0` oder einem anderen Terminalprogramm), ein Zeichen genügt:
+
+| Zeichen | Ausgabe |
+|---------|---------|
+| `1` | 1200 Hz (Bit 1) |
+| `2` | 2400 Hz (Bit 0) |
+| `3` | 600 Hz (Trennzeichen) |
+| `a` | 1200 Hz und 2400 Hz im Wechsel, je 1 s |
+| `0` | Ausgang aus (Low) |
+| `h` | Hilfe |
 
 ## PC-Tool: kc87tool
 
@@ -87,6 +102,8 @@ Aus einer echten `CSAVE`-Aufnahme abgelesen:
 | Bit 1 | 2 Pulse à ca. 455 µs | ca. 1,1 kHz |
 | Trennzeichen | 2 Pulse à ca. 870 µs | ca. 575 Hz |
 
+Sollwerte laut [Kassetteninterface](https://hc-ddr.hucki.net/wiki/doku.php/z9001/software/os/kassetteninterface): Trennzeichen 600 Hz, 1-Bit 1200 Hz, 0-Bit 2400 Hz. Die gemessenen Werte liegen 5 bis 16 % darunter. Die Wiki-Tabelle ordnet 0- und 1-Bit umgekehrt zu; in den Aufnahmen ist die längere Periode das 1-Bit (nur so stimmen Prüfsummen und `D3 D3 D3`).
+
 - Ein Byte besteht aus 8 Bits, LSB zuerst. Vor jedem Byte steht ein Trennzeichen.
 - Vor jedem Block steht ein Vorton aus 1-Bits (der erste ist sehr lang, ca. 6000 Perioden).
 - Ein Block hat 130 Bytes: Blocknummer, 128 Datenbytes, Prüfsumme (Summe der Datenbytes modulo 256).
@@ -108,7 +125,7 @@ cmake ..
 ninja          # oder: make
 ```
 
-Ergebnis: `kc87_logger.uf2` / `.elf`.
+Ergebnis: `kc87_logger.uf2` / `.elf` (Aufnahme) und `kc87_play_test.uf2` / `.elf` (PLAY-Test).
 
 Die Ziel-Platine steht in `firmware/CMakeLists.txt` (`set(PICO_BOARD pico ...)`):
 
