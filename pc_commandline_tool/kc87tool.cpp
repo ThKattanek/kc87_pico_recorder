@@ -385,6 +385,23 @@ static std::string basic_name(const uint8_t* d, size_t len) {
     return "";
 }
 
+// Kopfblock (Block 0) einer Maschinencode-Datei: Name (8), Typ (3), ab Byte 17 Anfangs-,
+// End- und Startadresse (je 2 Bytes, little-endian). Das Layout ist aus ZM30 und einer
+// eigenen SAVE-Aufnahme abgeleitet; Block 0 eines BASIC-Programms hat kein solches Format.
+static std::string com_header(const Block& b) {
+    if (b.nr != 0) return "";
+    auto ok = [](uint8_t c) { return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); };
+    if (!ok(b.data[0]) || !ok(b.data[8]) || !ok(b.data[9]) || !ok(b.data[10])) return "";
+    std::string name;
+    for (int i = 0; i < 8 && b.data[i]; ++i) name += (char)b.data[i];
+    std::string typ((const char*)&b.data[8], 3);
+    auto w = [&](int o) { return (unsigned)(b.data[o] | b.data[o + 1] << 8); };
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "Datei \"%s.%s\"  Adressen %04X-%04X  Start %04X", name.c_str(), typ.c_str(),
+                  w(17), w(19), w(21));
+    return buf;
+}
+
 static std::vector<Block> decode(const std::string& csv) {
     auto p = load_csv(csv);
     if (p.empty()) throw std::runtime_error("Keine Daten in " + csv);
@@ -401,6 +418,9 @@ static std::vector<Block> decode(const std::string& csv) {
         std::string name = basic_name(b.data, BLOCK_DATA);
         std::printf("  Block %3u: Pruefsumme %s", b.nr, b.checksum_ok ? "OK" : "FALSCH");
         if (!name.empty()) std::printf("  BASIC-Programm \"%s\"", name.c_str());
+        std::string com = com_header(b);
+        if (!com.empty()) std::printf("  %s", com.c_str());
+        if (b.nr == 255) std::printf("  (letzter Block)");
         std::printf("\n");
     }
     if (blocks.empty()) {

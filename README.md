@@ -161,8 +161,8 @@ Alternativ ohne CMake: `g++ -std=c++17 -O2 -o kc87tool kc87tool.cpp` (unter Wind
 
 ## Bekannte Einschränkungen
 
-- Playback ist am echten KC87 mit einem kurzen BASIC-Programm und mit einer WAV-Datei des Programms AIRWOLF (BASIC, 72 Blöcke, ca. 80 s) getestet, jeweils über `CLOAD`. Maschinencode (`LOAD`) fehlt noch. Die Pulsdauern und Vorton-Längen stammen aus der Aufnahme. Nach dem letzten Block hängt `encode` einen kurzen Vorton an, weil der KC87 den Block erst mit der nächsten Flanke abschließt. Bei `.csv`-Dateien kommt das Ende aus der Aufnahme.
+- Playback ist am echten KC87 mit einem kurzen BASIC-Programm und mit einer WAV-Datei des Programms AIRWOLF (BASIC, 72 Blöcke, ca. 80 s) getestet, jeweils über `CLOAD`. Maschinencode ist ebenfalls getestet: der Zusatz-Monitor ZM30 (33 Blöcke, Original der Kassette R0112) und ein selbst geschriebenes Z80-Programm wurden geladen, das eigene Programm zusätzlich mit `P` im ZM30 gespeichert, aufgenommen und wieder zurückgespielt. Die Pulsdauern und Vorton-Längen stammen aus der Aufnahme. Nach dem letzten Block hängt `encode` einen kurzen Vorton an, weil der KC87 den Block erst mit der nächsten Flanke abschließt. Bei `.csv`-Dateien kommt das Ende aus der Aufnahme.
 - Die Aufnahmedauer wird vom PC festgelegt (`--sec`), es gibt keinen automatischen Stopp nach Inaktivität
-- Dekodiert und geprüft ist bisher nur eine `CSAVE`-Aufnahme (BASIC). Maschinencode-Dateien sind nicht getestet, die Header-Felder werden nicht ausgewertet.
+- Aufgenommen und geprüft sind bisher ein `CSAVE`-Programm (BASIC) und ein Maschinenprogramm, gespeichert mit `P` im ZM30. Bei Maschinencode-Dateien zeigt `decode` im Kopfblock (Block 0) Name, Typ und die drei Adressen an. Die Zuordnung der Adress-Felder ist aus ZM30 und der eigenen Aufnahme abgeleitet. Der letzte Block einer Datei trägt die Nummer 255.
 - Als Exportformat gibt es nur TAP (mit JKCEMU 0.9.9.1 getestet, mit einem BASIC-Programm). Die Formate KCC und SSS gibt es nicht.
 - Der Ringpuffer fasst 8192 Messwerte; bei sehr hoher Pulsrate und blockierter USB-Verbindung kann er überlaufen (Status-Bit 0)
